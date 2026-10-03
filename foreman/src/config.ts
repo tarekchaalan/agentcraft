@@ -109,11 +109,18 @@ export interface Config {
   sim: SimConfig;
 }
 
-type Flags = Record<string, string | boolean>;
+type Flags = Record<string, string | string[] | boolean>;
 
 export function parseFlags(argv: string[]): { flags: Flags; positional: string[] } {
   const flags: Flags = {};
   const positional: string[] = [];
+  const setFlag = (key: string, value: string | boolean): void => {
+    const previous = flags[key];
+    // Launchers pass one --repo per checkout. All other flags retain last-value wins.
+    if (key === 'repo' && typeof value === 'string' && (typeof previous === 'string' || Array.isArray(previous))) {
+      flags[key] = [...(Array.isArray(previous) ? previous : [previous]), value];
+    } else flags[key] = value;
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === '--') {
@@ -126,19 +133,19 @@ export function parseFlags(argv: string[]): { flags: Flags; positional: string[]
     }
     const eq = a.indexOf('=');
     if (eq > 0) {
-      flags[a.slice(2, eq)] = a.slice(eq + 1);
+      setFlag(a.slice(2, eq), a.slice(eq + 1));
       continue;
     }
     const key = a.slice(2);
     if (key.startsWith('no-')) {
-      flags[key.slice(3)] = false;
+      setFlag(key.slice(3), false);
       continue;
     }
     const next = argv[i + 1];
     if (next !== undefined && !next.startsWith('--')) {
-      flags[key] = next;
+      setFlag(key, next);
       i++;
-    } else flags[key] = true;
+    } else setFlag(key, true);
   }
   return { flags, positional };
 }
@@ -260,8 +267,10 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
 
   const repoFlag = flags.repo;
   const repos: string[] = [];
-  if (typeof repoFlag === 'string') repos.push(...repoFlag.split(',').map((s) => s.trim()).filter(Boolean));
-  else if (Array.isArray(file.repos)) repos.push(...(file.repos as string[]));
+  if (typeof repoFlag === 'string' || Array.isArray(repoFlag)) {
+    const values = Array.isArray(repoFlag) ? repoFlag : [repoFlag];
+    repos.push(...values.flatMap((value) => value.split(',').map((s) => s.trim()).filter(Boolean)));
+  } else if (Array.isArray(file.repos)) repos.push(...(file.repos as string[]));
 
   const workersRaw = str(flags.workers) ?? env.AGENTCRAFT_WORKERS ?? (fileClaude.workers as string[] | string | undefined);
   const workers = Array.isArray(workersRaw)
@@ -341,7 +350,7 @@ export const HELP = `AgentCraft Foreman ${FOREMAN_VERSION}
 usage: npm run start -- [options]
 
   --backend sim|claude|codex  agent backend (default: claude; codex = an all-Codex team)
-  --repo <path>[,<path>]   register local git repo(s) at start (sim: defaults to a fresh sandbox/sim-demo)
+  --repo <path>[,<path>]   register local git repo(s) at start; repeatable (sim: defaults to a fresh sandbox/sim-demo)
   --goal "<text>"          submit a goal right away
   --port <n>               WebSocket port (default 7878, env AGENTCRAFT_PORT)
   --home <dir>             state root (default ~/.agentcraft, env AGENTCRAFT_HOME)

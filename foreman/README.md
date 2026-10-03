@@ -83,7 +83,7 @@ most ~100 ms of state, and interrupted agent turns resume on the next start.
 | `--home` / `AGENTCRAFT_HOME` | `~/.agentcraft` | state root |
 | `--user-name` / `AGENTCRAFT_USER_NAME` / config `userName` | OS user name | how the agents address you; sent to the mod in `foreman.status` |
 | `--profile` | backend name | state lives in `<home>/<profile>` |
-| `--repo <path>[,<path>]` | | register repos at start (sim: a fresh `sandbox/sim-demo`) |
+| `--repo <path>[,<path>]` | | register repos at start; repeatable (sim: a fresh `sandbox/sim-demo`) |
 | `--goal "<text>"` | | submit a goal right away |
 | `--reset` | | wipe this profile first |
 | `--notify` / `--no-notify` / `AGENTCRAFT_NOTIFY` | on for claude, off for sim | Windows, macOS or Linux (`notify-send`) notifications |
