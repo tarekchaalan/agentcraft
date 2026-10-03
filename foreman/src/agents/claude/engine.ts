@@ -1,23 +1,85 @@
 // The Claude engine: one Claude Agent SDK `query()` per turn. We spawn the CLI ourselves (same as
 // the SDK's local spawn) so its pid is known and a stopped turn's whole process tree can be ended.
 import { spawn } from 'node:child_process';
-import { query, type CanUseTool, type Options } from '@anthropic-ai/claude-agent-sdk';
+import { query, type AgentDefinition, type CanUseTool, type Options } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeConfig } from '../../config.js';
 import type { Foreman } from '../../foreman.js';
+import { truncate } from '../../util/text.js';
 import type { AuthCheck, Engine, Role, TurnSpec, TurnStats } from '../engine.js';
 import { detectApiAuth, NO_API_AUTH_MESSAGE, withAuthMode } from './auth.js';
+import { guardrailHook } from './permissions.js';
 import { StreamMapper } from './stream.js';
+import { loadSubagents } from './subagents.js';
 import { MCP_SERVER, mcpServer } from './tools.js';
 
 export class ClaudeEngine implements Engine {
   readonly id = 'claude' as const;
   readonly label = 'Claude';
+  /** subagent definitions from claude.subagents.agents */
+  private subagentDefs: Record<string, AgentDefinition> = {};
 
   constructor(
     private fm: Foreman,
     private cfg: ClaudeConfig,
     private queryFn: typeof query = query,
-  ) {}
+  ) {
+    const p = cfg.permissions;
+    const s = cfg.subagents;
+    if (s.enabled) {
+      const { agents, problems } = loadSubagents(s.agents);
+      for (const pr of problems) fm.log.warn(`claude.subagents: ${pr}`);
+      this.subagentDefs = agents;
+    }
+    const rules = p.allow.length + p.deny.length + p.ask.length;
+    fm.log.info(
+      `permissions: ${p.mode === 'auto' ? `auto mode${p.protectCheckouts ? ' (checkouts protected)' : ''}` : 'AgentCraft policy'}` +
+        `${rules ? `, ${rules} rule(s)` : ''}${p.webTools ? ', web tools' : ''}` +
+        `${s.enabled ? `, subagents${Object.keys(this.subagentDefs).length ? ` (${Object.keys(this.subagentDefs).join(', ')})` : ''}` : ''}`,
+    );
+  }
+
+  /**
+   * Permission mode, tools, guardrail hook and the user's rules for one turn (claude.permissions,
+   * claude.subagents). Policy mode is the default behaviour: every call goes through canUseTool.
+   */
+  private permissionOptions(spec: TurnSpec, canUseTool: CanUseTool): Partial<Options> {
+    const p = this.cfg.permissions;
+    const sub = this.cfg.subagents.enabled;
+    // the lead's Bash is read-only: the policy asks before anything that writes
+    const tools = spec.role === 'lead' ? ['Read', 'Grep', 'Glob', 'Bash'] : ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash', 'TodoWrite'];
+    if (p.webTools) tools.push('WebFetch', 'WebSearch');
+    if (sub) tools.push('Agent', 'Task');
+    // no allowedTools: every tool call (incl. our MCP tools) goes through canUseTool/policy
+    const disallowed = ['Bash(git push:*)', ...(sub ? [] : ['Task', 'Agent']), ...(p.webTools ? [] : ['WebSearch', 'WebFetch'])];
+    const rules = p.allow.length || p.deny.length || p.ask.length ? { permissions: { allow: p.allow, deny: p.deny, ask: p.ask } } : undefined;
+    const classify = spec.classify;
+    return {
+      permissionMode: p.mode === 'auto' ? 'auto' : 'default',
+      canUseTool,
+      tools,
+      disallowedTools: disallowed,
+      ...(rules ? { settings: rules } : {}),
+      ...(sub && Object.keys(this.subagentDefs).length ? { agents: this.subagentDefs } : {}),
+      ...(p.mode === 'auto' && classify
+        ? {
+            hooks: {
+              PreToolUse: [
+                {
+                  hooks: [
+                    guardrailHook(
+                      classify,
+                      () => spec.protectedRoots?.() ?? [],
+                      (tool, decision, reason, subagent) =>
+                        this.fm.agentLog(spec.agentId, decision === 'deny' ? 'error' : 'tool', `guardrail ${decision === 'deny' ? 'blocked' : 'asks you'}${subagent ? ' (subagent)' : ''}: ${tool} (${truncate(reason, 160)})`),
+                    ),
+                  ],
+                },
+              ],
+            },
+          }
+        : {}),
+    };
+  }
 
   model(role: Role): string {
     return role === 'lead' ? this.cfg.leadModel : this.cfg.workerModel;
@@ -71,12 +133,7 @@ export class ClaudeEngine implements Engine {
       effort: role === 'lead' ? this.cfg.leadEffort : this.cfg.effort,
       maxTurns: role === 'lead' ? this.cfg.maxTurnsLead : this.cfg.maxTurnsWorker,
       settingSources: [],
-      permissionMode: 'default',
-      canUseTool,
-      // the lead's Bash is read-only: the policy asks before anything that writes
-      tools: role === 'lead' ? ['Read', 'Grep', 'Glob', 'Bash'] : ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash', 'TodoWrite'],
-      // no allowedTools: every tool call (incl. our MCP tools) goes through canUseTool/policy
-      disallowedTools: ['Bash(git push:*)', 'Task', 'Agent', 'WebSearch', 'WebFetch'],
+      ...this.permissionOptions(spec, canUseTool),
       mcpServers: { [MCP_SERVER]: mcpServer(spec.tools) },
       systemPrompt: { type: 'preset', preset: 'claude_code', append: spec.instructions },
       abortController: abort,

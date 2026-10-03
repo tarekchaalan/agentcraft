@@ -3,6 +3,7 @@
 // merges, steering, restarts - is the team's (team.ts) and the same for every engine, so a team
 // can mix them (e.g. a Claude lead with Codex workers).
 import type { ChildProcess } from 'node:child_process';
+import type { Verdict } from '../policy.js';
 import type { AgentTool, TurnHandle } from './tools.js';
 
 export type EngineId = 'claude' | 'codex';
@@ -50,6 +51,14 @@ export interface TurnSpec {
   abort: AbortController;
   turn: TurnHandle;
   permission: PermissionGate;
+  /**
+   * The policy's verdict on a tool call without asking anyone (what `permission` would do before
+   * it turns to the user): engines with their own permission machinery (Claude Code's auto mode)
+   * keep the policy's guardrails with it.
+   */
+  classify?: (toolName: string, input: Record<string, unknown>) => Verdict;
+  /** roots nothing may write into without asking, whatever else allows it (registered checkouts, AgentCraft's state) */
+  protectedRoots?: () => string[];
   tools: AgentTool[];
   /** the agent process the engine spawned, so the team can end its whole tree on abort */
   onProcess(child: ChildProcess): void;

@@ -28,7 +28,7 @@ import { FOREMAN_VERSION } from '../config.js';
 import { ClientError, type Backend, type Foreman } from '../foreman.js';
 import { withGitSafety } from '../gitsafety.js';
 import { agentGitIdentity } from '../util/git.js';
-import { classifyToolUse, describeRuleKey, describeToolCall } from '../policy.js';
+import { classifyToolUse, describeRuleKey, describeToolCall, type PolicyContext } from '../policy.js';
 import type { BackendName, Decision, Goal, Task } from '../protocol.js';
 import { MERGE_OPTIONS, PERMISSION_OPTIONS } from '../protocol.js';
 import type { TestResult } from '../repos.js';
@@ -666,19 +666,30 @@ export class TeamBackend implements Backend {
     return { cwd: this.fm.repos.requireWorktree(t.repoId, t.worktree).path, role: 'worker' };
   }
 
+  /** What the AgentCraft policy needs to judge this agent's tool calls. */
+  private policyContext(agentId: string, role: Role, cwd: string): PolicyContext {
+    return {
+      role,
+      cwd,
+      readDirs: [this.fm.memory.dir],
+      alwaysAllow: this.fm.store.data.permissionRules[agentId] ?? [],
+      mcpServer: TEAM_MCP_SERVER,
+      leadReadCommands: this.cfg.leadReadCommands,
+      ...(this.cfg.subagents.enabled ? { subagents: true } : {}),
+    };
+  }
+
+  /** Auto mode's guardrails cover the user's checkouts and AgentCraft's own state (other agents' worktrees). */
+  private protectedRoots(): string[] {
+    return this.cfg.permissions.protectCheckouts ? [...this.fm.repos.list().map((r) => r.path), this.fm.config.home] : [];
+  }
+
   /** The policy, and the user for whatever it cannot allow by itself (a permission decision). */
   private permissionGate(agentId: string, role: Role, cwd: string, turn: TurnHandle): PermissionGate {
     return async (toolName, input, signal, title) => {
       // a stopped/paused/cancelled turn runs nothing more, even if its CLI has not exited yet
       if (turn.signal.aborted) return { allow: false, message: `Your turn was stopped by ${userName()}.`, interrupt: true };
-      const verdict = classifyToolUse(toolName, input, {
-        role,
-        cwd,
-        readDirs: [this.fm.memory.dir],
-        alwaysAllow: this.fm.store.data.permissionRules[agentId] ?? [],
-        mcpServer: TEAM_MCP_SERVER,
-        leadReadCommands: this.cfg.leadReadCommands,
-      });
+      const verdict = classifyToolUse(toolName, input, this.policyContext(agentId, role, cwd));
       if (verdict.action === 'allow') return { allow: true };
       if (verdict.action === 'deny') {
         this.fm.agentLog(agentId, 'error', `blocked: ${describeToolCall(toolName, input)} (${verdict.reason})`);
@@ -804,6 +815,8 @@ export class TeamBackend implements Backend {
           abort,
           turn,
           permission: this.permissionGate(agentId, role, cwd, turn),
+          classify: (tool, input) => classifyToolUse(tool, input, this.policyContext(agentId, role, cwd)),
+          protectedRoots: () => this.protectedRoots(),
           tools: agentTools(this.fm, agentId, role, this.hooks, turn),
           // a stopped turn's whole process tree is ended before its worktree is handed on
           onProcess: (child) => {

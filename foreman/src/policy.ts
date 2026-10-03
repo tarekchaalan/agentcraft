@@ -64,6 +64,8 @@ export interface PolicyContext {
   tempDirs?: string[];
   /** lead only: command prefixes the user declared read-only, e.g. `bd show` */
   leadReadCommands?: string[];
+  /** subagents enabled (claude.subagents): the Agent/Task tool is allowed, never with its own worktree */
+  subagents?: boolean;
 }
 
 const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'LS', 'NotebookRead']);
@@ -2063,6 +2065,12 @@ function askVerdict(reason: string, key: string): Verdict {
 export function classifyToolUse(toolName: string, input: Record<string, unknown>, ctx: PolicyContext): Verdict {
   const server = ctx.mcpServer ?? 'agentcraft';
   if (toolName.startsWith(`mcp__${server}__`)) return { action: 'allow', reason: 'AgentCraft tool' };
+  if ((toolName === 'Agent' || toolName === 'Task') && ctx.subagents) {
+    // a subagent works in this agent's worktree with its tools; a worktree of its own would be
+    // outside the Foreman's control (merges, clean-up, other agents)
+    if (input.isolation !== undefined && input.isolation !== null && input.isolation !== 'none') return { action: 'deny', reason: 'Subagents work in your worktree; they cannot get a worktree of their own.' };
+    return { action: 'allow', reason: 'subagent' };
+  }
   if (toolName in DENIED_TOOLS) return { action: 'deny', reason: DENIED_TOOLS[toolName]! };
   if (ALWAYS_OK.has(toolName)) return { action: 'allow', reason: toolName };
 

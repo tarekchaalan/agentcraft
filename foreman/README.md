@@ -102,6 +102,34 @@ most ~100 ms of state, and interrupted agent turns resume on the next start.
 | sim: `--speed`, `--seed`, `--autostart`, `--showcase [late]`, `--auto-answer`, `--no-ambient` | | |
 
 `<home>/config.json` can hold the same settings (`{"backend":"claude","claude":{"workers":["kit","wren"]}}`).
+
+### Permissions and subagents (`claude.permissions`, `claude.subagents`)
+
+```json
+{ "claude": {
+    "permissions": {
+      "mode": "auto",
+      "allow": ["Bash(codex exec:*)"], "deny": [], "ask": [],
+      "webTools": true,
+      "protectCheckouts": true },
+    "subagents": { "enabled": true, "agents": ["gate-verifier", "~/agents/reviewer.md"] } } }
+```
+
+- `mode: "policy"` (default): every tool call goes through AgentCraft's policy; what it cannot verify
+  as safe asks you in-world.
+- `mode: "auto"`: Claude Code's auto mode. A classifier decides what the policy would have asked
+  about. A PreToolUse hook keeps the guardrails that apply whatever the classifier, your rules or a
+  subagent do: everything the policy denies (git push, git safety settings, the lead editing),
+  git internals (`.git`, `GIT_DIR`, `--git-dir`), and with `protectCheckouts` writes into your
+  checkouts of registered repos or AgentCraft's own state; those still ask you. Classifier denials
+  show on the agent's monitor.
+- `allow` / `deny` / `ask`: Claude Code permission rules, in both modes, after the guardrails. An
+  allow rule skips AgentCraft's policy for what it matches.
+- `webTools`: WebFetch and WebSearch (asked per host in policy mode).
+- `subagents`: agents may start Claude Code subagents (built-ins such as Explore, plus the agent files
+  listed: names under `~/.claude/agents` or paths). Their tool calls go through the same policy and
+  guardrails; they never get a worktree of their own. A `permissionMode` in an agent file is ignored.
+
 While running, `<home>/<profile>/foreman.json` records `{pid, port, host, backend, profile, version, startedAt}`
 so launch scripts can find it; `<home>/foreman.json` holds the same for the first live Foreman (when
 it exits, another live profile takes its place). A second Foreman on a profile that is already
