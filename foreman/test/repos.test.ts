@@ -28,24 +28,22 @@ function mergeDecision(repoId: string, worktree: string, taskId?: string): Decis
 }
 
 describe('RepoManager', () => {
-  it('registers a repo and refuses non-git paths', async () => {
+  it('registers a git repo with commits in git mode, and refuses paths that are not folders', async () => {
     const r = await h.fm.repos.add(repoPath);
     expect(r.id).toBe('demo-app');
+    expect(r.mode).toBe('git');
     expect(r.branch).toBe('main');
     expect(r.head).toMatch(/^[0-9a-f]{7}$/);
     expect(r.dirty).toBe(false);
     expect((await h.fm.repos.add(repoPath)).id).toBe('demo-app'); // idempotent
-    const notGit = tempDir();
-    await expect(h.fm.repos.add(notGit)).rejects.toThrow(/not a git repository/);
-    await expect(h.fm.repos.add(path.join(notGit, 'missing'))).rejects.toThrow(/does not exist/);
-    rmrf(notGit);
-    // a folder inside a repo is refused instead of silently registering the enclosing repo
-    const sub = path.join(repoPath, 'new-folder');
-    fs.mkdirSync(sub, { recursive: true });
-    await expect(h.fm.repos.add(sub)).rejects.toThrow(/not a repository root: it is inside the git repository/);
-    await expect(h.fm.repos.add(path.join(repoPath, 'src'))).rejects.toThrow(/not a repository root/);
-    fs.rmSync(sub, { recursive: true, force: true });
+    const dir = tempDir();
+    await expect(h.fm.repos.add(path.join(dir, 'missing'))).rejects.toThrow(/does not exist/);
+    fs.writeFileSync(path.join(dir, 'file.txt'), 'x');
+    await expect(h.fm.repos.add(path.join(dir, 'file.txt'))).rejects.toThrow(/not a folder/);
+    rmrf(dir);
     expect(h.fm.repos.list().map((r) => r.id)).toEqual(['demo-app']);
+    // no private repository is made for a git-mode repo
+    expect(fs.existsSync(h.fm.repos.shadowRoot)).toBe(false);
   });
 
   it('creates a per-worker worktree on agentcraft/<agent>/<task-slug>', async () => {

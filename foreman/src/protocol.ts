@@ -169,13 +169,17 @@ export const Worktree = z.object({
 });
 export type Worktree = z.infer<typeof Worktree>;
 
+export const RepoMode = z.enum(['git', 'folder']);
+export type RepoMode = z.infer<typeof RepoMode>;
+
 export const Repo = z.object({
   id: Id.describe('e.g. "demo-app"'),
   name: z.string(),
-  path: z.string().describe('absolute path of the user checkout'),
-  branch: z.string().describe('base branch agents branch from and merge into'),
+  mode: RepoMode.optional().describe('"git" (default): the path is a git repository with commits; agents branch from it and approved merges become commits on its branch. "folder": the path is any folder (empty, not a repository, or a repository without commits); agents work on a private copy kept by the Foreman, and approved merges only write files into the folder, never a commit into the user\'s own repository'),
+  path: z.string().describe('absolute path of the user checkout or folder'),
+  branch: z.string().describe('base branch agents branch from and merge into (mode "folder": the Foreman\'s private branch, "main")'),
   head: z.string().optional().describe('short sha of base branch'),
-  dirty: z.boolean().describe('user checkout has uncommitted tracked changes (merges are refused while dirty)'),
+  dirty: z.boolean().describe('user checkout has uncommitted tracked changes (merges are refused while dirty). Always false in mode "folder": the Foreman absorbs your edits before it merges'),
   worktrees: z.array(Worktree),
   ci: CiStatus.describe('latest CI/test result across this repo'),
 });
@@ -480,7 +484,7 @@ export const CLIENT_MESSAGES = {
   'task.action': { schema: TaskActionMsg, doc: 'Steer a task from the Task Wall.' },
   'agent.action': { schema: AgentActionMsg, doc: 'Pause/resume/stop an agent, or spawn (activate) an off-shift worker.' },
   'diff.request': { schema: DiffRequestMsg, doc: 'Ask for the structured diff of a worktree. Answered with `diff` (same requestId).' },
-  'repo.add': { schema: RepoAddMsg, doc: 'Register a local git repo (console: `/repo add <path>`).' },
+  'repo.add': { schema: RepoAddMsg, doc: 'Register a local project folder: a git repository with commits, or any other existing folder, even an empty one (console: `/repo add <path>`).' },
 } as const;
 
 export const ENTITY_SCHEMAS = {

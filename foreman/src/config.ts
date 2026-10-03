@@ -341,7 +341,8 @@ export const HELP = `AgentCraft Foreman ${FOREMAN_VERSION}
 usage: npm run start -- [options]
 
   --backend sim|claude|codex  agent backend (default: claude; codex = an all-Codex team)
-  --repo <path>[,<path>]   register local git repo(s) at start (sim: defaults to a fresh sandbox/sim-demo)
+  --repo <path>[,<path>]   work in these existing folder(s): a git repo, or any folder, empty or not
+                           (sim: defaults to a fresh sandbox/sim-demo)
   --goal "<text>"          submit a goal right away
   --port <n>               WebSocket port (default 7878, env AGENTCRAFT_PORT)
   --home <dir>             state root (default ~/.agentcraft, env AGENTCRAFT_HOME)

@@ -38,7 +38,7 @@ describe('client intents', () => {
   it('goal.submit without a repo or backend fails with a clear error', async () => {
     const r = await send({ type: 'goal.submit', text: 'do things' });
     expect(ack(r).ok).toBe(false);
-    expect(ack(r).error).toMatch(/no repo connected/);
+    expect(ack(r).error).toMatch(/no project folder connected/);
     expect(r.some((m) => m.type === 'error')).toBe(true);
   });
 

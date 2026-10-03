@@ -1,7 +1,7 @@
 # AgentCraft Foreman
 
 The Foreman is the brain of AgentCraft: a Node 22 + TypeScript service that runs a team of Claude
-agents (one lead, up to five workers) on a real git repo and streams everything to the Minecraft
+agents (one lead, up to five workers) in a project folder (a git repo, or any folder) and streams everything to the Minecraft
 mod over a WebSocket. The game is only a view. The Foreman owns all state, keeps working while
 Minecraft is closed, and survives restarts.
 
@@ -30,7 +30,7 @@ cd foreman
 npm install
 
 # real agents: needs ANTHROPIC_API_KEY (or CLAUDE_CODE_USE_BEDROCK / _VERTEX / _FOUNDRY)
-npm run start -- --backend claude --repo C:\path\to\your\repo
+npm run start -- --backend claude --repo C:\path\to\your\repo   # a git repo, or any existing folder, even an empty one
 # personal use only: your local `claude` CLI login instead of an API key
 npm run start -- --backend claude --repo C:\path\to\your\repo --use-claude-login
 # Codex agents on your Codex login (`codex login`), or a mixed team
@@ -83,7 +83,7 @@ most ~100 ms of state, and interrupted agent turns resume on the next start.
 | `--home` / `AGENTCRAFT_HOME` | `~/.agentcraft` | state root |
 | `--user-name` / `AGENTCRAFT_USER_NAME` / config `userName` | OS user name | how the agents address you; sent to the mod in `foreman.status` |
 | `--profile` | backend name | state lives in `<home>/<profile>` |
-| `--repo <path>[,<path>]` | | register repos at start (sim: a fresh `sandbox/sim-demo`) |
+| `--repo <path>[,<path>]` | | work in these existing folders at start: git repos with commits, or any other folder (sim: a fresh `sandbox/sim-demo`) |
 | `--goal "<text>"` | | submit a goal right away |
 | `--reset` | | wipe this profile first |
 | `--notify` / `--no-notify` / `AGENTCRAFT_NOTIFY` | on for claude, off for sim | Windows, macOS or Linux (`notify-send`) notifications |
@@ -289,8 +289,9 @@ spawns git with an empty environment); the policy refuses every command it can s
   With `--merge-style squash`, main gets one commit with the task's changes (your identity,
   signed as above, `Co-authored-by` the agents) instead of a merge commit plus the agents'
   commits - useful for repos that require signed commits or verified emails. Branches are kept.
-- `/repo add <path>` must name a repository root; a folder inside another repository is refused
-  (instead of silently registering the enclosing repo as the merge target).
+- `/repo add <path>` takes any existing folder (see "Folder mode" below). A git repository root with
+  at least one commit is used as it is. Anything else is a plain folder; in particular a folder inside
+  another repository never registers (or touches) the enclosing repository.
 - Merges are refused (and the decision re-opens with the reason) if the checkout that has the base
   branch checked out has uncommitted tracked changes. A merge that would conflict is not made either:
   with the claude backend the task goes back to its worker (`git merge <base>` in its worktree,
@@ -360,11 +361,37 @@ npx tsc --noEmit
 npm run check       # all of the above + protocol doc freshness
 ```
 
+## Folder mode (no git needed)
+
+`/repo add <path>` and `--repo` work on any existing folder, as when you start Claude Code in a new
+directory and ask for a small program:
+
+| The folder is | Mode | What happens |
+|---|---|---|
+| a git repository with at least one commit | `git` | agents branch from its current branch; an approved merge is a commit on it (everything above) |
+| empty, or has files but no git | `folder` | no `.git` is ever created in it; an approved merge writes the files into it |
+| a git repository with no commits yet | `folder` | your `.git` is not touched: no commit, branch or object is made; merged files appear as untracked files for you to commit |
+| inside another git repository | `folder` | that repository is not touched; merged files appear as changes in it |
+
+In folder mode the Foreman keeps a private git repository for the folder at
+`<profile>/shadow/<id>.git`, with the folder as its work tree (`GIT_DIR` + `GIT_WORK_TREE` on each
+call; nothing is written into any git config). Its `main` branch holds snapshots of the folder: one
+before agents branch off and one right before a merge, so agents start from what is in the folder
+now, and files you edited in the meantime are part of the base (the merge is three-way; your edits are
+not overwritten). If you and an agent both add the same new file, that is a normal merge conflict:
+the task goes back to its worker. Everything else (worktrees, diffs, review, CI, approval) is the same
+as in git mode. `repo.dirty` is always false in folder mode, so a merge is never refused for your own edits.
+
+Limits: `node_modules/`, `.venv/`, `venv/`, `__pycache__/`, `*.pyc`, `.DS_Store` and `Thumbs.db` are
+never snapshotted, and a `.gitignore` in the folder is honoured. Your home directory, a drive root and
+a folder with more than 20000 files (not counting those) are refused. The `git` program is still
+required: the Foreman uses it internally.
+
 ## Troubleshooting
 
 - **`port 7878 is already in use`**: another Foreman is running (`~/.agentcraft/foreman.json` and `~/.agentcraft/<profile>/foreman.json` have its pid) - or use `--port`.
 - **`profile "claude" is in use by the Foreman pid N`**: that profile already has a running Foreman; stop it or use `--profile`.
-- **`... is not a repository root`**: `/repo add` the repository's top folder (the message names it).
+- **`... is your home directory or a drive root`** / **`holds more than 20000 files`**: folder mode snapshots the whole folder, so `/repo add` the project's own folder, not a parent of many projects.
 - **Banner says auth failed**: set `ANTHROPIC_API_KEY` (or a cloud provider switch) and restart the Foreman. With `--use-claude-login`: run `claude` and `/login`. The sim backend works without auth. Why the claude.ai login is opt-in: Anthropic does not allow third-party tools to offer it ([Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview)); see `src/agents/claude/auth.ts`.
 - **Merge refused: uncommitted changes**: commit or stash in your checkout, then choose Merge again (the decision re-opened).
 - **Reset the demo repo**: `node sandbox/create-demo.mjs --force`.

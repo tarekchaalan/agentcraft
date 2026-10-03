@@ -26,6 +26,7 @@
 - <a id="feedkind"></a>**FeedKind**: `goal`, `plan`, `task`, `message`, `decision`, `merge`, `ci`, `memory`, `system`, `error`, `user`
 - <a id="notifylevel"></a>**NotifyLevel**: `info`, `warn`, `need_user`
 - <a id="worktreestatus"></a>**WorktreeStatus**: `active`, `merged`, `abandoned`
+- <a id="repomode"></a>**RepoMode**: `git`, `folder`
 - <a id="backendname"></a>**BackendName**: `sim`, `claude`, `codex`
 - <a id="authstatus"></a>**AuthStatus**: `ok`, `failed`, `unknown`, `checking` - `failed` must be shown loudly (in-world banner): the claude backend cannot run.
 
@@ -118,10 +119,11 @@ Exact option labels: merge decisions use `Merge`, `Request changes`, `Reject`; p
 | --- | --- | --- | --- |
 | `id` | string | yes | e.g. "demo-app" |
 | `name` | string | yes |  |
-| `path` | string | yes | absolute path of the user checkout |
-| `branch` | string | yes | base branch agents branch from and merge into |
+| `mode` | [RepoMode](#repomode) | no | "git" (default): the path is a git repository with commits; agents branch from it and approved merges become commits on its branch. "folder": the path is any folder (empty, not a repository, or a repository without commits); agents work on a private copy kept by the Foreman, and approved merges only write files into the folder, never a commit into the user's own repository |
+| `path` | string | yes | absolute path of the user checkout or folder |
+| `branch` | string | yes | base branch agents branch from and merge into (mode "folder": the Foreman's private branch, "main") |
 | `head` | string | no | short sha of base branch |
-| `dirty` | boolean | yes | user checkout has uncommitted tracked changes (merges are refused while dirty) |
+| `dirty` | boolean | yes | user checkout has uncommitted tracked changes (merges are refused while dirty). Always false in mode "folder": the Foreman absorbs your edits before it merges |
 | `worktrees` | [Worktree](#worktree)[] | yes |  |
 | `ci` | `unknown` \| `running` \| `pass` \| `fail` | yes | latest CI/test result across this repo |
 
@@ -1012,7 +1014,7 @@ Ask for the structured diff of a worktree. Answered with `diff` (same requestId)
 
 ### `repo.add`
 
-Register a local git repo (console: `/repo add <path>`).
+Register a local project folder: a git repository with commits, or any other existing folder, even an empty one (console: `/repo add <path>`).
 
 | field | type | required | notes |
 | --- | --- | --- | --- |

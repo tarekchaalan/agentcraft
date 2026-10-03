@@ -104,7 +104,7 @@ public final class ConsoleCommands {
 		new Command("stop", "/stop @agent", "take an agent off shift"),
 		new Command("spawn", "/spawn @agent [task]", "bring an agent on shift"),
 		new Command("task", "/task <id> cancel|retry|prioritize|reassign", "steer a task"),
-		new Command("repo", "/repo add <path>", "register a local git repo"),
+		new Command("repo", "/repo add <path>", "work in a local folder (git or not)"),
 		new Command("repos", "/repos", "list repos"),
 		new Command("status", "/status", "goal, agents, tasks and decisions"),
 		new Command("sound", "/sound on|off", "decision bell and done chime"),
@@ -214,14 +214,14 @@ public final class ConsoleCommands {
 			return new Repos();
 		}
 		if (!sub.equals("add")) {
-			return new Invalid("usage: /repo add <path to a local git repo>");
+			return new Invalid("usage: /repo add <path to an existing folder>");
 		}
 		String path = rest.strip().substring(3).strip();
 		if (path.length() >= 2 && (path.startsWith("\"") && path.endsWith("\"") || path.startsWith("'") && path.endsWith("'"))) {
 			path = path.substring(1, path.length() - 1).strip();
 		}
 		if (path.isEmpty()) {
-			return new Invalid("usage: /repo add <path to a local git repo>");
+			return new Invalid("usage: /repo add <path to an existing folder>");
 		}
 		return new RepoAdd(path);
 	}
@@ -602,7 +602,7 @@ public final class ConsoleCommands {
 			}
 			case "/repo" -> {
 				if (argIndex == 1 && "add".startsWith(lower)) {
-					out.add(new Completion(ts, cursor, "add ", "add", "register a local git repo", null, null));
+					out.add(new Completion(ts, cursor, "add ", "add", "work in a local folder (git or not)", null, null));
 				}
 			}
 			case "/sound" -> {

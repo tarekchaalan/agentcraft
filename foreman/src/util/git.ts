@@ -103,8 +103,8 @@ export interface WorktreeListEntry {
   bare: boolean;
 }
 
-export async function listWorktrees(repoPath: string): Promise<WorktreeListEntry[]> {
-  const out = (await git(repoPath, ['worktree', 'list', '--porcelain'])).stdout;
+export async function listWorktrees(repoPath: string, opts: GitOptions = {}): Promise<WorktreeListEntry[]> {
+  const out = (await git(repoPath, ['worktree', 'list', '--porcelain'], opts)).stdout;
   const entries: WorktreeListEntry[] = [];
   let cur: WorktreeListEntry | undefined;
   for (const line of out.split(/\r?\n/)) {

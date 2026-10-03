@@ -1,6 +1,6 @@
 // System-prompt appendices and job prompts for the claude backend.
 import type { Foreman } from '../foreman.js';
-import type { Goal, Task, Worktree } from '../protocol.js';
+import type { Goal, Repo, Task, Worktree } from '../protocol.js';
 import { truncate } from '../util/text.js';
 import { userName } from '../user.js';
 import { isPrBranch, pullBriefs, type PullRequest } from '../pulls.js';
@@ -55,7 +55,11 @@ function planText(fm: Foreman): string {
   return plan ? truncate(plan.body, 3000) : '(no plan in memory)';
 }
 
-export function planPrompt(fm: Foreman, goal: Goal, repoPath: string, branch: string, pulls: PullRequest[] = []): string {
+export function planPrompt(fm: Foreman, goal: Goal, repo: Repo, pulls: PullRequest[] = []): string {
+  const branch = repo.branch;
+  const where = fm.repos.isFolder(repo)
+    ? `Project folder: ${repo.path}. It may be empty or hold files that are not under version control; if it is empty, plan the project from scratch (pick the simplest fitting stack, and have the first task set up the project skeleton and a way to run it). Do not mention git, branches or commits to ${userName()}: they work with a plain folder.`
+    : `Repository: ${repo.path} (base branch ${branch}).`;
   const prs = pulls.length
     ? `
 Pull requests the Foreman fetched for this goal (contributors' work; each head is on a local branch):
@@ -70,7 +74,7 @@ For pull requests:
   return `New goal from ${userName()}:
 "${goal.text}"
 
-Repository: ${repoPath} (base branch ${branch}). Explore it read-only (Glob/Grep to find files, Read for a file - Read cannot open a directory), then:
+${where} Explore it read-only (Glob/Grep to find files, Read for a file - Read cannot open a directory), then:
 1. write_memory the plan (title "Plan: ...", scope shared)
 2. create_task for each task (deps + assignee)
 3. send_message to "all" with a two-line briefing

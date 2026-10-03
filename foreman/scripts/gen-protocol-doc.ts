@@ -40,6 +40,7 @@ const ENUMS: Record<string, AnySchema> = {
   FeedKind: P.FeedKind,
   NotifyLevel: P.NotifyLevel,
   WorktreeStatus: P.WorktreeStatus,
+  RepoMode: P.RepoMode,
   BackendName: P.BackendName,
   AuthStatus: P.AuthStatus,
 };
