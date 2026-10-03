@@ -4,8 +4,10 @@ import type { Foreman } from '../../foreman.js';
 import { firstLine, headLines, tailLines, truncate } from '../../util/text.js';
 import { relPath, toolActivity } from '../activity.js';
 
-import type { TurnStats } from '../engine.js';
-export type { TurnStats };
+import type { RateLimitReport, TurnStats } from '../engine.js';
+import { limitFromText, resetsAtMs } from '../limits.js';
+export type { RateLimitReport, TurnStats };
+export { limitFromText, resetsAtMs };
 
 interface Block {
   type: string;
@@ -88,6 +90,8 @@ export class StreamMapper {
     private agentId: string,
     private cwd: string,
     private role: 'lead' | 'worker',
+    /** live usage reports, so the scheduler can react while the turn is still running */
+    private onRateLimit?: (r: RateLimitReport) => void,
   ) {}
 
   handle(msg: SDKMessage): void {
@@ -109,6 +113,7 @@ export class StreamMapper {
           const err = String(msg.error);
           this.stats.errors.push(err);
           if (err === 'authentication_failed' || err === 'oauth_org_not_allowed') this.stats.authFailed = err;
+          if (err === 'rate_limit') this.stats.limited = true;
           fm.agentLog(id, 'error', `API error: ${err}`);
         }
         this.stats.sessionId ??= msg.session_id;
@@ -168,6 +173,13 @@ export class StreamMapper {
           const joined = (msg.errors ?? []).join(' ');
           if (AUTH_RE.test(joined)) this.stats.authFailed = firstLine(joined, 200);
         }
+        if (this.stats.isError) {
+          const l = limitFromText([this.stats.resultText ?? (msg.subtype === 'success' ? msg.result : ''), ...this.stats.errors].join(' '));
+          if (l.limited) {
+            this.stats.limited = true;
+            if (l.resetsAt && !this.stats.rateLimit?.resetsAt) this.stats.rateLimit = { status: 'rejected', resetsAt: l.resetsAt };
+          }
+        }
         const cost = typeof msg.total_cost_usd === 'number' ? ` · $${msg.total_cost_usd.toFixed(3)}` : '';
         fm.agentLog(id, this.stats.isError ? 'error' : 'result', `turn ${msg.subtype === 'success' && !msg.is_error ? 'complete' : `ended: ${msg.subtype}`} (${msg.num_turns} steps${cost})`);
         break;
@@ -175,7 +187,17 @@ export class StreamMapper {
       default: {
         const t = (msg as { type: string; subtype?: string }).type;
         if (t === 'rate_limit_event') {
-          const info = (msg as { rate_limit_info?: { status?: string; utilization?: number; rateLimitType?: string } }).rate_limit_info;
+          const info = (msg as { rate_limit_info?: { status?: string; utilization?: number; rateLimitType?: string; resetsAt?: number } }).rate_limit_info;
+          if (info?.status === 'allowed' || info?.status === 'allowed_warning' || info?.status === 'rejected') {
+            const r: RateLimitReport = { status: info.status };
+            const at = resetsAtMs(info.resetsAt);
+            if (at) r.resetsAt = at;
+            if (info.rateLimitType) r.type = info.rateLimitType;
+            if (typeof info.utilization === 'number') r.utilization = info.utilization;
+            this.stats.rateLimit = r;
+            if (r.status === 'rejected') this.stats.limited = true;
+            this.onRateLimit?.(r);
+          }
           if (info?.status === 'rejected') {
             fm.agentLog(id, 'error', `rate limited (${info.rateLimitType ?? 'limit'}); waiting...`);
             fm.setAgent(id, { state: 'blocked', activity: 'rate limited - waiting' });
