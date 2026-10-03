@@ -663,7 +663,11 @@ export class TeamBackend implements Backend {
     }
     const t = job.taskId ? this.fm.tasks.get(job.taskId) : undefined;
     if (!t?.worktree || !t.repoId) throw new Error(`job for ${job.agentId} has no worktree`);
-    return { cwd: this.fm.repos.requireWorktree(t.repoId, t.worktree).path, role: 'worker' };
+    const wt = this.fm.repos.requireWorktree(t.repoId, t.worktree);
+    // its directory is gone: the CLI would fail to start in it (the SDK reports that as a
+    // "native binary failed to launch" error)
+    if (wt.status !== 'active') throw new Error(`worktree ${wt.id} is ${wt.status}; ${t.id} has no worktree to work in`);
+    return { cwd: wt.path, role: 'worker' };
   }
 
   /** The policy, and the user for whatever it cannot allow by itself (a permission decision). */
@@ -932,7 +936,9 @@ export class TeamBackend implements Backend {
       }
       if (job.kind === 'review' && job.taskId) {
         const t = this.fm.tasks.get(job.taskId);
-        const hasDecision = this.fm.decisions.open().some((d) => d.kind === 'merge' && d.taskId === job.taskId);
+        // pending, not open: a merge the user just approved may still be running, and the task
+        // only leaves review once it is done
+        const hasDecision = this.fm.decisions.pending().some((d) => d.kind === 'merge' && d.taskId === job.taskId);
         if (t && t.status === 'review' && !hasDecision) {
           // lead gave no verdict: still surface the merge to the user (never auto-merge)
           this.openMergeDecision(t, `Marlow's review: ${truncate(stats?.resultText ?? '(no verdict)', 300)}`);
@@ -1024,6 +1030,10 @@ export class TeamBackend implements Backend {
 
   private openMergeDecision(t: Task, summary: string): void {
     const wt = this.fm.repos.requireWorktree(t.repoId!, t.worktree!);
+    if (wt.status !== 'active') {
+      this.fm.log.warn(`no merge decision for ${t.id}: worktree ${wt.id} is ${wt.status}`);
+      return;
+    }
     this.fm.createDecision({
       agentId: LEAD,
       kind: 'merge',
