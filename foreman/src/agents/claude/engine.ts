@@ -8,16 +8,28 @@ import type { AuthCheck, Engine, Role, TurnSpec, TurnStats } from '../engine.js'
 import { detectApiAuth, NO_API_AUTH_MESSAGE, withAuthMode } from './auth.js';
 import { StreamMapper } from './stream.js';
 import { MCP_SERVER, mcpServer } from './tools.js';
+import { pruneUsage, publishUsage, readPlanUsage } from './usage.js';
+
+/** how often the plan's usage windows are re-read from a live session (claude.ai login) */
+const USAGE_REFRESH_MS = 5 * 60_000;
 
 export class ClaudeEngine implements Engine {
   readonly id = 'claude' as const;
   readonly label = 'Claude';
+  private lastUsageRead = 0;
 
   constructor(
     private fm: Foreman,
     private cfg: ClaudeConfig,
     private queryFn: typeof query = query,
   ) {}
+
+  /** At most every few minutes, from a live query: the CLI's /usage windows (best effort, see usage.ts). */
+  private refreshUsage(q: object): void {
+    if (!this.cfg.useClaudeLogin || Date.now() - this.lastUsageRead < USAGE_REFRESH_MS) return;
+    this.lastUsageRead = Date.now();
+    void readPlanUsage(q, pruneUsage(this.fm.status.usage)).then((u) => publishUsage(this.fm, u));
+  }
 
   model(role: Role): string {
     return role === 'lead' ? this.cfg.leadModel : this.cfg.workerModel;
@@ -94,6 +106,7 @@ export class ClaudeEngine implements Engine {
     };
     const mapper = new StreamMapper(this.fm, agentId, cwd, role, spec.onRateLimit);
     const q = this.queryFn({ prompt: spec.prompt, options });
+    this.refreshUsage(q);
     // the abort signal alone lets a CLI finish what it is doing (seen in a real run: ~6 s of
     // further turns after /stop). close() force-ends the subprocess and its transports.
     const closeQuery = () => {

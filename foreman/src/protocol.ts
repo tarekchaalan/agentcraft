@@ -211,6 +211,20 @@ export const FeedItem = z.object({
 });
 export type FeedItem = z.infer<typeof FeedItem>;
 
+export const UsageWindow = z.object({
+  id: z.string().describe('"five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet", "overage"'),
+  label: z.string().describe('short label, e.g. "5h", "7d"'),
+  pct: z.number().min(0).max(100).describe('percent of the window used'),
+  resetsAt: Ts.optional().describe('when the window resets'),
+});
+export type UsageWindow = z.infer<typeof UsageWindow>;
+
+export const PlanUsage = z.object({
+  windows: z.array(UsageWindow).describe('shortest window first'),
+  updatedAt: Ts,
+});
+export type PlanUsage = z.infer<typeof PlanUsage>;
+
 export const ForemanStatus = z.object({
   version: z.string(),
   backend: BackendName,
@@ -221,6 +235,7 @@ export const ForemanStatus = z.object({
   showcase: z.boolean().optional().describe('sim: holding a static showcase state (`--showcase` or `--showcase late`)'),
   costUsd: z.number().optional().describe('claude: estimated spend of this profile (sum over all sessions, survives restarts)'),
   userName: z.string().optional().describe('the person the team works for, as the agents address them (UI: "<name> answered")'),
+  usage: PlanUsage.optional().describe('claude.ai login: how much of the plan\'s usage windows is used (from the agents\' sessions)'),
 });
 export type ForemanStatus = z.infer<typeof ForemanStatus>;
 

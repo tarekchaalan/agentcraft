@@ -321,6 +321,15 @@ public final class ConsoleActions {
 		if (spend != null) {
 			ConsoleLog.add(Tone.INFO, "Claude API spend so far: " + spend + " (estimated, this profile)");
 		}
+		String usage = usageLabel(s);
+		if (usage != null) {
+			var st = s.status();
+			for (var w : st.usage().windows()) {
+				String reset = w.resetsAt() == null ? "" : ", resets " + java.time.format.DateTimeFormatter.ofPattern("EEE HH:mm")
+					.format(java.time.Instant.ofEpochMilli(w.resetsAt()).atZone(java.time.ZoneId.systemDefault()));
+				ConsoleLog.add(w.pct() >= 90 ? Tone.ERROR : Tone.INFO, "Plan usage " + w.label() + ": " + Math.round(w.pct()) + "%" + reset);
+			}
+		}
 		for (Agent a : s.agents().values()) {
 			String st = !a.isActive() ? "off shift" : a.isPaused() ? "paused" : a.state().wire().replace('_', ' ');
 			ConsoleLog.add(Tone.INFO, a.name() + " \u00b7 " + st + (a.activity().isEmpty() ? "" : " \u00b7 " + a.activity()) + (a.taskId() != null ? " ("
@@ -334,6 +343,22 @@ public final class ConsoleActions {
 				ConsoleLog.add(Tone.INFO, d.id() + " " + DecisionQueue.kindLabel(d.kind()) + ": " + ConsoleCommands.oneLine(d.question(), 80), d.agentId());
 			}
 		}
+	}
+
+	/** "5h 42% \u00b7 7d 18%" once the plan reported usage (claude.ai login), else null. */
+	static @Nullable String usageLabel(ForemanState s) {
+		var st = s.status();
+		if (st == null || st.usage() == null || st.usage().windows().isEmpty()) {
+			return null;
+		}
+		StringBuilder b = new StringBuilder();
+		for (var w : st.usage().windows()) {
+			if (b.length() > 0) {
+				b.append(" \u00b7 ");
+			}
+			b.append(w.label()).append(' ').append(Math.round(w.pct())).append('%');
+		}
+		return b.toString();
 	}
 
 	/** "$2.46" for the claude backend once something was spent, else null. */

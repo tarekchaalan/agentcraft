@@ -40,6 +40,7 @@ import { leadSystemPrompt, planPrompt, RESUME_PROMPT, reviewPrompt, workerSystem
 import { fetchPulls, githubOrigin, prRefs, pullBriefs, type PullRequest } from '../pulls.js';
 import type { Engine, EngineId, PermissionGate, RateLimitReport, Role, TurnStats } from './engine.js';
 import { limitFromText } from './limits.js';
+import { pruneUsage, publishUsage, withWindow } from './claude/usage.js';
 import { agentTools, type ToolHooks, type TurnHandle } from './tools.js';
 import { modelLabel } from './models.js';
 import { userName } from '../user.js';
@@ -522,6 +523,9 @@ export class TeamBackend implements Backend {
 
   /** A live usage report from a running turn. */
   protected onRateLimit(r: RateLimitReport): void {
+    // the plan's usage windows (foreman.status.usage): every report names the window it is closest to
+    if (r.type && typeof r.utilization === 'number') publishUsage(this.fm, withWindow(pruneUsage(this.fm.status.usage), r.type, r.utilization * 100, r.resetsAt));
+    else if (r.type && r.status === 'rejected') publishUsage(this.fm, withWindow(pruneUsage(this.fm.status.usage), r.type, 100, r.resetsAt));
     if (r.status === 'rejected') this.setLimit(r.resetsAt, r.type);
     else if (r.status === 'allowed_warning') {
       const until = r.resetsAt ?? Date.now() + THROTTLE_DEFAULT_MS;

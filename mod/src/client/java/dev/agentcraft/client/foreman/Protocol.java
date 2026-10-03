@@ -209,8 +209,22 @@ public final class Protocol {
 		}
 	}
 
+	/** One plan usage window (claude.ai login), e.g. 5h at 42%. */
+	public record UsageWindow(String id, String label, double pct, @Nullable Long resetsAt) {
+		public UsageWindow {
+			id = id == null ? "" : id;
+			label = label == null ? id : label;
+		}
+	}
+
+	public record PlanUsage(List<UsageWindow> windows, long updatedAt) {
+		public PlanUsage {
+			windows = windows == null ? List.of() : List.copyOf(windows);
+		}
+	}
+
 	public record ForemanStatus(String version, BackendName backend, AuthStatus auth, @Nullable String message, @Nullable String account,
-		@Nullable Double speed, @Nullable Boolean showcase, @Nullable Double costUsd, @Nullable String userName) {
+		@Nullable Double speed, @Nullable Boolean showcase, @Nullable Double costUsd, @Nullable String userName, @Nullable PlanUsage usage) {
 		public ForemanStatus {
 			version = version == null ? "?" : version;
 			backend = backend == null ? BackendName.UNKNOWN : backend;
