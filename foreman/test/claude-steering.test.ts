@@ -243,6 +243,30 @@ describe('claude backend steering (fake SDK)', () => {
     expect(fm.agent('kit')!.activity).toMatch(/max turns/);
     expect(fm.tasks.get('t1')!.blockedReason).toMatch(/error_max_turns/);
     expect(h.events.some((e) => e.type === 'agent.upsert' && e.agent.id === 'kit' && e.agent.state === 'error')).toBe(true);
+    fm.taskAction('t1', 'cancel');
+    expect(fm.agent('kit')).toMatchObject({ active: true, state: 'idle', station: 'lounge', activity: 'task cancelled' });
+    expect(fm.agent('kit')!.taskId).toBeUndefined();
+    expect(fm.agent('kit')!.worktree).toBeUndefined();
     await fm.close();
+  });
+
+  it('cancelling a paused task discards its continuation without discarding work', async () => {
+    const calls: Call[] = [];
+    const { h } = await boot('kit', calls, { kit: kitAsks });
+    try {
+      await h.fm.submitGoal('version flag');
+      await until(() => h.fm.decisions.open().some(d => d.agentId === 'kit'));
+      const worktree = h.fm.repos.requireWorktree('demo-app', 'kit-t1').path;
+      await h.fm.agentAction('kit', 'pause');
+      await until(() => !Object.hasOwn((h.fm.store.data.backend.claude as { inflight: object }).inflight, 'kit'));
+      h.fm.taskAction('t1', 'cancel');
+      await h.fm.agentAction('kit', 'resume');
+      await new Promise(r => setTimeout(r, 200));
+      expect(h.fm.tasks.get('t1')!.status).toBe('cancelled');
+      expect(h.fm.agent('kit')).toMatchObject({ state: 'idle', station: 'lounge', active: true });
+      expect(h.fm.agent('kit')!.taskId).toBeUndefined();
+      expect(calls.filter(c => c.agent === 'kit')).toHaveLength(1);
+      expect(fs.readFileSync(path.join(worktree, 'KIT_PARTIAL.md'), 'utf8')).toContain('half-done');
+    } finally { await h.fm.close(); }
   });
 });
