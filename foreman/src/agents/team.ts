@@ -671,10 +671,13 @@ export class TeamBackend implements Backend {
     return async (toolName, input, signal, title) => {
       // a stopped/paused/cancelled turn runs nothing more, even if its CLI has not exited yet
       if (turn.signal.aborted) return { allow: false, message: `Your turn was stopped by ${userName()}.`, interrupt: true };
+      // what the agent's engine enabled on top (Claude: claude.context skills and MCP tools)
+      const engineCtx = this.engineFor(agentId).policyContext?.();
       const verdict = classifyToolUse(toolName, input, {
+        ...engineCtx,
         role,
         cwd,
-        readDirs: [this.fm.memory.dir],
+        readDirs: [this.fm.memory.dir, ...(engineCtx?.readDirs ?? [])],
         alwaysAllow: this.fm.store.data.permissionRules[agentId] ?? [],
         mcpServer: TEAM_MCP_SERVER,
         leadReadCommands: this.cfg.leadReadCommands,

@@ -64,6 +64,10 @@ export interface PolicyContext {
   tempDirs?: string[];
   /** lead only: command prefixes the user declared read-only, e.g. `bd show` */
   leadReadCommands?: string[];
+  /** skills the user enabled for agents ("plugin:name"); without any, the Skill tool is refused */
+  skills?: string[];
+  /** MCP tools (names or "prefix*") the user allowed without asking */
+  mcpAllow?: string[];
 }
 
 const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'LS', 'NotebookRead']);
@@ -2063,6 +2067,12 @@ function askVerdict(reason: string, key: string): Verdict {
 export function classifyToolUse(toolName: string, input: Record<string, unknown>, ctx: PolicyContext): Verdict {
   const server = ctx.mcpServer ?? 'agentcraft';
   if (toolName.startsWith(`mcp__${server}__`)) return { action: 'allow', reason: 'AgentCraft tool' };
+  if (toolName === 'Skill' && ctx.skills?.length) {
+    // loading a skill only adds its instructions; every tool call it leads to is checked as usual
+    const name = typeof input.skill === 'string' ? input.skill : typeof input.command === 'string' ? input.command : '';
+    const ok = ctx.skills.some((s) => s === name || s.split(':').pop() === name);
+    return ok ? { action: 'allow', reason: `skill ${name}` } : { action: 'deny', reason: `Skill "${name}" is not enabled for AgentCraft agents (enabled: ${ctx.skills.join(', ')}).` };
+  }
   if (toolName in DENIED_TOOLS) return { action: 'deny', reason: DENIED_TOOLS[toolName]! };
   if (ALWAYS_OK.has(toolName)) return { action: 'allow', reason: toolName };
 
@@ -2136,7 +2146,11 @@ export function classifyToolUse(toolName: string, input: Record<string, unknown>
     return always(key) ?? askVerdict(`network access (${toolName}${host ? ` ${host}` : ''})`, key);
   }
 
-  if (toolName.startsWith('mcp__')) return always(toolName) ?? askVerdict(`external MCP tool ${toolName}`, toolName);
+  if (toolName.startsWith('mcp__')) {
+    const allowed = ctx.mcpAllow?.some((p) => (p.endsWith('*') ? p.length > 6 && toolName.startsWith(p.slice(0, -1)) : toolName === p));
+    if (allowed) return { action: 'allow', reason: `MCP tool allowed in config: ${toolName}` };
+    return always(toolName) ?? askVerdict(`external MCP tool ${toolName}`, toolName);
+  }
   return always(toolName) ?? askVerdict(`unrecognised tool ${toolName}`, toolName);
 }
 
