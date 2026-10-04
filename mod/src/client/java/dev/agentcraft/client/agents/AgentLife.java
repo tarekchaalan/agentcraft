@@ -87,6 +87,12 @@ public final class AgentLife {
 	private int greetUntil;
 	private int nextGreet;
 	private boolean playerWasNear;
+	/**
+	 * The body is turned towards what the head tracks. Held until tracking stops: releasing it as soon
+	 * as the angle dropped under the trigger let the body swing back to its spot's yaw, over the
+	 * trigger again, and the agent twitched in place every tick.
+	 */
+	private boolean facingHeld;
 	// conversation
 	final SpeechBubble bubble = new SpeechBubble();
 	private @Nullable String listenTo;
@@ -534,12 +540,10 @@ public final class AgentLife {
 		}
 		float rel = Mth.wrapDegrees(wantYaw - body);
 		boolean canTurnBody = !walking && sit < 0.05f && (faceBody || posture == Posture.IDLE || posture == Posture.TALK || posture == Posture.WAIT);
-		if (tracking && canTurnBody && Math.abs(rel) > (faceBody ? 25 : 70)) {
-			// turn towards whoever we look at (waiting agents face you)
-			e.motion().faceTowards(Mth.wrapDegrees(wantYaw));
-		} else {
-			e.motion().faceTowards(null);
-		}
+		// turn towards whoever we look at (waiting agents face you) once they are far enough to the
+		// side, and keep facing them while we track them (hysteresis: see facingHeld)
+		facingHeld = tracking && canTurnBody && (facingHeld || Math.abs(rel) > (faceBody ? 25 : 70));
+		e.motion().faceTowards(facingHeld ? Float.valueOf(Mth.wrapDegrees(wantYaw)) : null);
 		float limit = sit > 0.5f ? 60f : 75f;
 		rel = Mth.clamp(rel, -limit, limit);
 		wantPitch = Mth.clamp(wantPitch, -40f, 45f);
