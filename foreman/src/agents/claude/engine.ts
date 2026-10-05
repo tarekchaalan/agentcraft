@@ -5,7 +5,9 @@ import { query, type CanUseTool, type Options } from '@anthropic-ai/claude-agent
 import type { ClaudeConfig } from '../../config.js';
 import type { Foreman } from '../../foreman.js';
 import type { AuthCheck, Engine, Role, TurnSpec, TurnStats } from '../engine.js';
+import { injectedContext } from '../prompts.js';
 import { detectApiAuth, NO_API_AUTH_MESSAGE, withAuthMode } from './auth.js';
+import { configuredMcpServers, readInstructions, readRepoContext } from './repoctx.js';
 import { StreamMapper } from './stream.js';
 import { MCP_SERVER, mcpServer } from './tools.js';
 
@@ -34,7 +36,7 @@ export class ClaudeEngine implements Engine {
     async function* never(): AsyncGenerator<never> {
       await new Promise(() => undefined);
     }
-    const q = this.queryFn({ prompt: never(), options: { settingSources: [], persistSession: false, permissionMode: 'default', env: withAuthMode({ ...process.env }, this.cfg.useClaudeLogin) } });
+    const q = this.queryFn({ prompt: never(), options: { settingSources: [], strictMcpConfig: true, persistSession: false, permissionMode: 'default', env: withAuthMode({ ...process.env }, this.cfg.useClaudeLogin) } });
     try {
       const info = await Promise.race([q.accountInfo(), new Promise<never>((_, r) => setTimeout(() => r(new Error('timed out after 45s')), 45_000))]);
       const ok = !!(info.email || info.organization || (info.apiKeySource && info.apiKeySource !== 'none') || (info.tokenSource && info.tokenSource !== 'none') || (info.apiProvider && info.apiProvider !== 'firstParty'));
@@ -65,20 +67,25 @@ export class ClaudeEngine implements Engine {
       const r = await spec.permission(toolName, input, opts.signal, opts.title);
       return r.allow ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: r.message, ...(r.interrupt ? { interrupt: true } : {}) };
     };
+    // settingSources stays [] (a repo's settings/hooks/.mcp.json never run): context comes from here,
+    // read from the base checkout, never the agent's worktree
+    const context = injectedContext(readInstructions(this.cfg.instructionsFile), this.cfg.repoContext ? readRepoContext(spec.repoPath, (m) => this.fm.log.warn(m)) : '');
     const options: Options = {
       cwd,
       model: this.model(role),
       effort: role === 'lead' ? this.cfg.leadEffort : this.cfg.effort,
       maxTurns: role === 'lead' ? this.cfg.maxTurnsLead : this.cfg.maxTurnsWorker,
       settingSources: [],
+      // only the servers passed here: no .mcp.json, no plugins, no claude.ai connectors
+      strictMcpConfig: true,
       permissionMode: 'default',
       canUseTool,
       // the lead's Bash is read-only: the policy asks before anything that writes
       tools: role === 'lead' ? ['Read', 'Grep', 'Glob', 'Bash'] : ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash', 'TodoWrite'],
       // no allowedTools: every tool call (incl. our MCP tools) goes through canUseTool/policy
       disallowedTools: ['Bash(git push:*)', 'Task', 'Agent', 'WebSearch', 'WebFetch'],
-      mcpServers: { [MCP_SERVER]: mcpServer(spec.tools) },
-      systemPrompt: { type: 'preset', preset: 'claude_code', append: spec.instructions },
+      mcpServers: { ...configuredMcpServers(this.cfg.mcpServers, spec.repoPath), [MCP_SERVER]: mcpServer(spec.tools) },
+      systemPrompt: { type: 'preset', preset: 'claude_code', append: context ? `${spec.instructions}\n\n${context}` : spec.instructions },
       abortController: abort,
       env: withAuthMode(spec.env, this.cfg.useClaudeLogin),
       spawnClaudeCodeProcess: (o) => {

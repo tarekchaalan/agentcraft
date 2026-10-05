@@ -38,6 +38,11 @@ export interface TurnSpec {
   role: Role;
   /** lead: the user's checkout (read-only); worker: its worktree */
   cwd: string;
+  /**
+   * the base checkout of the repository the agent works on (the lead's cwd; a worker's worktree is
+   * made from it). Context read from here is the user's, never something an agent wrote.
+   */
+  repoPath: string;
   prompt: string;
   /** role, rules and worktree, added to the engine's own system prompt */
   instructions: string;

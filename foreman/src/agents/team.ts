@@ -654,16 +654,16 @@ export class TeamBackend implements Backend {
     }
   }
 
-  private cwdFor(job: Job): { cwd: string; role: 'lead' | 'worker' } {
+  private cwdFor(job: Job): { cwd: string; role: 'lead' | 'worker'; repoPath: string } {
     if (job.agentId === LEAD) {
       const goal = job.goalId ? this.fm.goal(job.goalId) : this.fm.currentGoal();
       const repo = goal?.repoId ? this.fm.repos.get(goal.repoId) : this.fm.repos.defaultRepo();
       if (!repo) throw new Error('no repo for the lead');
-      return { cwd: repo.path, role: 'lead' };
+      return { cwd: repo.path, role: 'lead', repoPath: repo.path };
     }
     const t = job.taskId ? this.fm.tasks.get(job.taskId) : undefined;
     if (!t?.worktree || !t.repoId) throw new Error(`job for ${job.agentId} has no worktree`);
-    return { cwd: this.fm.repos.requireWorktree(t.repoId, t.worktree).path, role: 'worker' };
+    return { cwd: this.fm.repos.requireWorktree(t.repoId, t.worktree).path, role: 'worker', repoPath: this.fm.repos.require(t.repoId).path };
   }
 
   /** The policy, and the user for whatever it cannot allow by itself (a permission decision). */
@@ -678,6 +678,7 @@ export class TeamBackend implements Backend {
         alwaysAllow: this.fm.store.data.permissionRules[agentId] ?? [],
         mcpServer: TEAM_MCP_SERVER,
         leadReadCommands: this.cfg.leadReadCommands,
+        mcpAllow: this.cfg.mcpAllow,
       });
       if (verdict.action === 'allow') return { allow: true };
       if (verdict.action === 'deny') {
@@ -796,6 +797,7 @@ export class TeamBackend implements Backend {
           agentId,
           role,
           cwd,
+          repoPath: where.repoPath,
           prompt,
           instructions: systemAppend,
           ...(resume ? { resume } : {}),

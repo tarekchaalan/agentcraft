@@ -42,6 +42,17 @@ How to work
 `.trim();
 }
 
+/** Your own instructions and the repo's CLAUDE.md/rules, with the line that keeps AgentCraft's rules on top. */
+export function injectedContext(instructions: string, repoContext: string): string {
+  if (!instructions && !repoContext) return '';
+  const parts = [
+    `# Instructions from ${userName()}\nWhere they conflict with the AgentCraft rules above (no subagents, never push, questions through ask_user), the AgentCraft rules win.`,
+  ];
+  if (instructions) parts.push(instructions);
+  if (repoContext) parts.push(`# Repo context (CLAUDE.md and .claude/rules of the repository)\n${repoContext}`);
+  return parts.join('\n\n');
+}
+
 export function boardSummary(fm: Foreman, goalId?: string): string {
   const tasks = fm.tasks.list().filter((t) => !goalId || t.goalId === goalId);
   if (!tasks.length) return '(no tasks yet)';
