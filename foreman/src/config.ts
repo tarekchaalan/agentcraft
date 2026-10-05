@@ -12,6 +12,13 @@ export const FOREMAN_VERSION = '0.1.0';
 /** Repo root of the AgentCraft project (foreman/src/config.ts -> ../..). */
 export const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
+/** A stdio MCP server the agents may use (the SDK's McpStdioServerConfig subset). */
+export interface McpStdioConfig {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
 export interface ClaudeConfig {
   leadModel: string;
   workerModel: string;
@@ -38,6 +45,14 @@ export interface ClaudeConfig {
   useClaudeLogin: boolean;
   /** command prefixes the lead runs without asking, e.g. `bd show` */
   leadReadCommands: string[];
+  /** inject each repo's CLAUDE.md and .claude/rules/*.md (read from the base checkout) into the agents' system prompt */
+  repoContext: boolean;
+  /** markdown file appended to every agent's system prompt (your own rules); `~` and paths relative to home work */
+  instructionsFile?: string;
+  /** extra stdio MCP servers for the agents (never read from a repo's .mcp.json) */
+  mcpServers: Record<string, McpStdioConfig>;
+  /** full MCP tool names (`mcp__<server>__<tool>`) that run without asking; everything else asks */
+  mcpAllow: string[];
 }
 
 export type EngineName = 'claude' | 'codex';
@@ -193,6 +208,38 @@ function mergeStyle(v: unknown): 'merge' | 'squash' {
   throw new Error(`unknown merge style "${String(v)}" (use merge or squash)`);
 }
 
+const MCP_NAME = /^[a-z0-9-]+$/;
+
+/** `agentcraft*` is refused: policy.ts approves every `mcp__agentcraft__*` tool by prefix. */
+function mcpServers(v: unknown): Record<string, McpStdioConfig> {
+  if (v === undefined) return {};
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) throw new Error('claude.mcpServers must be an object of name -> {command, args?, env?}');
+  const out: Record<string, McpStdioConfig> = {};
+  for (const [name, raw] of Object.entries(v)) {
+    if (!MCP_NAME.test(name) || name.startsWith('agentcraft')) throw new Error(`bad MCP server name "${name}" (lowercase letters, digits and "-"; not "agentcraft*")`);
+    const o = (raw ?? {}) as Record<string, unknown>;
+    if (typeof o.command !== 'string' || !o.command) throw new Error(`MCP server "${name}" needs a "command"`);
+    if (o.args !== undefined && !(Array.isArray(o.args) && o.args.every((a) => typeof a === 'string'))) throw new Error(`MCP server "${name}": args must be a list of strings`);
+    out[name] = { command: o.command, ...(o.args ? { args: o.args as string[] } : {}), ...(o.env ? { env: o.env as Record<string, string> } : {}) };
+  }
+  return out;
+}
+
+function mcpAllow(v: unknown, servers: Record<string, McpStdioConfig>): string[] {
+  if (v === undefined) return [];
+  if (!Array.isArray(v) || !v.every((t) => typeof t === 'string')) throw new Error('claude.mcpAllow must be a list of tool names');
+  for (const t of v as string[]) {
+    const server = /^mcp__([a-z0-9-]+)__\S+$/.exec(t)?.[1];
+    if (!server || !(server in servers)) throw new Error(`bad mcpAllow entry "${t}" (use the full name mcp__<server>__<tool> of a server in claude.mcpServers)`);
+  }
+  return v as string[];
+}
+
+function homePath(v: string | undefined, home: string): string | undefined {
+  if (!v) return undefined;
+  return path.resolve(home, v === '~' || v.startsWith('~/') ? path.join(os.homedir(), v.slice(1)) : v);
+}
+
 const EFFORTS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 function effort(v: unknown, d: EffortLevel): EffortLevel {
   if (v === undefined) return d;
@@ -207,7 +254,7 @@ export const KNOWN_FLAGS = new Set([
   'lead-model', 'worker-model', 'effort', 'lead-effort', 'max-turns', 'max-turns-lead', 'max-turns-worker',
   'max-concurrent', 'ci', 'max-budget', 'resume', 'lead-review', 'speed', 'seed', 'showcase', 'auto-answer',
   'ambient', 'lead-read-commands', 'lead-engine', 'worker-engine', 'engines', 'codex-path', 'codex-model', 'codex-lead-model',
-  'codex-worker-model', 'codex-effort', 'codex-lead-effort',
+  'codex-worker-model', 'codex-effort', 'codex-lead-effort', 'repo-context',
 ]);
 
 function engineName(v: unknown, d: EngineName, what: string): EngineName {
@@ -273,6 +320,7 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
       : ['juniper', 'kit', 'wren'];
 
   const model = str(flags.model);
+  const servers = mcpServers(fileClaude.mcpServers);
   const cfg: Config = {
     backend,
     userName: (str(pick('user-name', 'AGENTCRAFT_USER_NAME')) ?? str(file.userName))?.trim().slice(0, 40) || defaultUserName(),
@@ -310,6 +358,10 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
       leadReview: bool(flags['lead-review'] ?? fileClaude.leadReview, true),
       useClaudeLogin: bool(flags['use-claude-login'] ?? env.AGENTCRAFT_USE_CLAUDE_LOGIN ?? fileClaude.useClaudeLogin, false),
       leadReadCommands: readCommands(flags['lead-read-commands'] ?? env.AGENTCRAFT_LEAD_READ_COMMANDS ?? fileClaude.leadReadCommands),
+      repoContext: bool(flags['repo-context'] ?? fileClaude.repoContext, false),
+      instructionsFile: homePath(str(fileClaude.instructionsFile), home),
+      mcpServers: servers,
+      mcpAllow: mcpAllow(fileClaude.mcpAllow, servers),
     },
     codex: {
       path: str(flags['codex-path']) ?? str(env.AGENTCRAFT_CODEX_PATH) ?? str(fileCodex.path),
@@ -382,6 +434,8 @@ usage: npm run start -- [options]
   --lead-read-commands "<cmd>,..."
                            read commands the lead runs without asking, by prefix, e.g.
                            "bd show,gh issue view" (env AGENTCRAFT_LEAD_READ_COMMANDS)
+  --repo-context           give the agents each repo's CLAUDE.md and .claude/rules (config.json
+                           claude.repoContext; also claude.instructionsFile, mcpServers, mcpAllow)
   --no-lead-review         skip the lead's review turn before merge decisions
   --no-resume              do not resume interrupted sessions on start
 

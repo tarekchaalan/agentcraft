@@ -94,3 +94,32 @@ describe('user name', () => {
     }
   });
 });
+
+describe('vault config: repoContext, instructionsFile, mcpServers, mcpAllow', () => {
+  async function loadWith(claude: Record<string, unknown>, args: string[] = []) {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    home = tempDir();
+    fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ claude }));
+    return loadConfig(['--home', home, ...args], {});
+  }
+  const engram = { engram: { command: 'engram', args: ['mcp', '--tools=agent'] } };
+
+  it('is off and empty by default', () => {
+    const c = load([]).claude;
+    expect(c).toMatchObject({ repoContext: false, mcpServers: {}, mcpAllow: [] });
+    expect(c.instructionsFile).toBeUndefined();
+  });
+
+  it('reads the file, and --repo-context / --no-repo-context win over it', async () => {
+    expect((await loadWith({ repoContext: true, mcpServers: engram, mcpAllow: ['mcp__engram__mem_search'] })).claude).toMatchObject({ repoContext: true, mcpServers: engram, mcpAllow: ['mcp__engram__mem_search'] });
+    expect((await loadWith({ repoContext: false }, ['--repo-context'])).claude.repoContext).toBe(true);
+    expect((await loadWith({ repoContext: true }, ['--no-repo-context'])).claude.repoContext).toBe(false);
+  });
+
+  it('refuses server names that could inherit the agentcraft approval, and mcpAllow for unknown servers', async () => {
+    for (const name of ['agentcraft', 'agentcraft__x', 'a__b', 'Eng']) await expect(loadWith({ mcpServers: { [name]: { command: 'x' } } })).rejects.toThrow(/bad MCP server name/);
+    await expect(loadWith({ mcpServers: engram, mcpAllow: ['mem_search'] })).rejects.toThrow(/bad mcpAllow/);
+    await expect(loadWith({ mcpServers: engram, mcpAllow: ['mcp__github__create_issue'] })).rejects.toThrow(/bad mcpAllow/);
+  });
+});
