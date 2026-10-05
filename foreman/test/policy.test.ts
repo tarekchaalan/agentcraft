@@ -271,6 +271,11 @@ const rows: Row[] = [
   ['our MCP tool', 'mcp__agentcraft__send_message', { to: 'kit', text: 'hi' }, worker, 'allow'],
   ['foreign MCP tool', 'mcp__github__create_issue', {}, worker, 'ask'],
   ['todo', 'TodoWrite', { todos: [] }, worker, 'allow'],
+  // claude.mcpAllow: exact full names only
+  ['MCP tool in mcpAllow', 'mcp__engram__mem_search', {}, { ...worker, mcpAllow: ['mcp__engram__mem_search'] }, 'allow'],
+  ['MCP tool outside mcpAllow', 'mcp__engram__mem_save', {}, { ...worker, mcpAllow: ['mcp__engram__mem_search'] }, 'ask'],
+  ['short name is not in mcpAllow', 'mem_search', {}, { ...worker, mcpAllow: ['mcp__engram__mem_search'] }, 'ask'],
+  ['our MCP tool with mcpAllow set', 'mcp__agentcraft__send_message', {}, { ...worker, mcpAllow: ['mcp__engram__mem_search'] }, 'allow'],
 
   // ---- round 4: commands git runs for us are checked like any other command ----
   bash('bisect run: sh -c npm install', 'git bisect run sh -c "npm install left-pad && npm test"', 'ask'),

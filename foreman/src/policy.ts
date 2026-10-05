@@ -58,6 +58,8 @@ export interface PolicyContext {
   alwaysAllow?: string[];
   /** our in-process MCP server name */
   mcpServer?: string;
+  /** full names of external MCP tools that run without asking (exact match) */
+  mcpAllow?: string[];
   /** home directory (tests); default os.homedir() */
   home?: string;
   /** scratch directories agents may read and write (default: the OS temp dir) */
@@ -2136,7 +2138,10 @@ export function classifyToolUse(toolName: string, input: Record<string, unknown>
     return always(key) ?? askVerdict(`network access (${toolName}${host ? ` ${host}` : ''})`, key);
   }
 
-  if (toolName.startsWith('mcp__')) return always(toolName) ?? askVerdict(`external MCP tool ${toolName}`, toolName);
+  if (toolName.startsWith('mcp__')) {
+    if (ctx.mcpAllow?.includes(toolName)) return { action: 'allow', reason: `MCP tool allowed by config: ${toolName}` };
+    return always(toolName) ?? askVerdict(`external MCP tool ${toolName}`, toolName);
+  }
   return always(toolName) ?? askVerdict(`unrecognised tool ${toolName}`, toolName);
 }
 
