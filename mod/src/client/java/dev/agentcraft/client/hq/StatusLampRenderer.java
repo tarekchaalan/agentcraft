@@ -426,7 +426,7 @@ public class StatusLampRenderer extends StationRenderer<StatusLampBlockEntity, S
 		frameStrip(poseStack, collector, x0 - 2, y0 - 2, x0 + cw + 2, y0 + ch + 2, 2, brass, light);
 		WorldUi.submitNineSlice(poseStack, collector, WorldUi.Layer.SOLID, Kit.PANEL_PAPER, x0, y0, cw, ch, 0xFFFFFFFF, light);
 		int ink = UiStyle.INK;
-		int muted = UiStyle.color("paper.muted", 0xFF655E55);
+		int muted = UiStyle.base("paper.muted", 0xFF655E55);
 		int dim = s.stale ? 0x99 : 0xFF;
 		// progress ring (2x) with the done count inside ("2/9"), captioned "tasks"
 		float rx = x0 + 10;

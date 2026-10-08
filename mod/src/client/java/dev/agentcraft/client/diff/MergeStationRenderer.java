@@ -208,21 +208,21 @@ public class MergeStationRenderer extends StationRenderer<MergeStationBlockEntit
 		ps.translate(-wb / 2f, hb, 0.001f);
 		ps.rotateDegrees(Axis.YP, 180);
 		ps.scale(-1f / PX_PER_BLOCK, -1f / PX_PER_BLOCK, 1f);
-		WorldUi.submitFill(ps, collector, 0, 0, w, h + 1, UiStyle.color("palette.ui.panel_shade"), light);
+		WorldUi.submitFill(ps, collector, 0, 0, w, h + 1, UiStyle.base("palette.ui.panel_shade"), light);
 		ps.popPose();
 		ps.popPose();
 	}
 
 	private void drawCard(State s, PoseStack ps, SubmitNodeCollector c, Font font, int w, int h, int light) {
-		int ink = UiStyle.color("paper.text");
-		int muted = UiStyle.color("paper.muted");
+		int ink = UiStyle.base("paper.text");
+		int muted = UiStyle.base("paper.muted");
 		if (s.empty) {
 			WorldUi.submitNineSlice(ps, c, WorldUi.Layer.SOLID, Kit.card("done"), 0, 0, w, h, 0xFFFFFFFF, light);
 			WorldUi.submitSprite(ps, c, Kit.dot("done", false), 7, 7, 7, 7, 0xFFFFFFFF, light);
 			WorldUi.submitText(ps, c, "All merged", 17, 4, ink, light);
 			WorldUi.submitText(ps, c, "nothing waits", 17, 12, muted, light);
 			// the brass foot
-			WorldUi.submitFill(ps, c, 2, h - 1, w - 2, h + 1, UiStyle.color("palette.ui.border"), light);
+			WorldUi.submitFill(ps, c, 2, h - 1, w - 2, h + 1, UiStyle.base("palette.ui.border"), light);
 			return;
 		}
 		WorldUi.submitNineSlice(ps, c, WorldUi.Layer.SOLID, Kit.card("review"), 0, 0, w, h, 0xFFFFFFFF, light);
@@ -245,7 +245,7 @@ public class MergeStationRenderer extends StationRenderer<MergeStationBlockEntit
 			ps.pushPose();
 			ps.translate(0, 0, -LIFT);
 			WorldUi.submitNineSlice(ps, c, WorldUi.Layer.SOLID, Kit.progressFill("clay"), cx, 4, cw, 10, 0xFFFFFFFF, light);
-			WorldUi.submitText(ps, c, count, cx + (cw - font.width(count) + 1) / 2, 5, UiStyle.color("palette.ui.panel_hi"), light);
+			WorldUi.submitText(ps, c, count, cx + (cw - font.width(count) + 1) / 2, 5, UiStyle.base("palette.ui.panel_hi", 0xFFFFFBF4), light);
 			ps.popPose();
 		} else {
 			WorldUi.submitText(ps, c, count, w - 5 - font.width(count), 5, muted, light);
@@ -270,9 +270,9 @@ public class MergeStationRenderer extends StationRenderer<MergeStationBlockEntit
 		int sy = h - 13;
 		int sx = x;
 		if (!s.adds.isEmpty()) {
-			WorldUi.submitText(ps, c, s.adds, sx, sy, UiStyle.color("paper.add_fg"), light);
+			WorldUi.submitText(ps, c, s.adds, sx, sy, UiStyle.base("paper.add_fg"), light);
 			sx += font.width(s.adds) + 3;
-			WorldUi.submitText(ps, c, s.dels, sx, sy, UiStyle.color("paper.del_fg"), light);
+			WorldUi.submitText(ps, c, s.dels, sx, sy, UiStyle.base("paper.del_fg"), light);
 			sx += font.width(s.dels) + 4;
 		}
 		WorldUi.submitSprite(ps, c, Kit.dot(s.ciFamily, false), w - 12, sy, 7, 7, 0xFFFFFFFF, light);
@@ -280,7 +280,7 @@ public class MergeStationRenderer extends StationRenderer<MergeStationBlockEntit
 		if (!ci.isEmpty() && sx + font.width(ci) <= w - 15) {
 			WorldUi.submitText(ps, c, ci, w - 15 - font.width(ci), sy, s.ciInk, light);
 		}
-		WorldUi.submitFill(ps, c, 2, h - 1, w - 2, h + 1, UiStyle.color("palette.ui.border"), light);
+		WorldUi.submitFill(ps, c, 2, h - 1, w - 2, h + 1, UiStyle.base("palette.ui.border"), light);
 	}
 
 	private static void submitFace(PoseStack ps, SubmitNodeCollector c, @Nullable String agent, float x, float y, int light) {

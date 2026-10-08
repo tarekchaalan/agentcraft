@@ -16,6 +16,7 @@ import dev.agentcraft.client.console.ConsoleCommands.Repos;
 import dev.agentcraft.client.console.ConsoleCommands.ShowDiff;
 import dev.agentcraft.client.console.ConsoleCommands.Sound;
 import dev.agentcraft.client.console.ConsoleCommands.Status;
+import dev.agentcraft.client.console.ConsoleCommands.Theme;
 import dev.agentcraft.client.console.ConsoleCommands.TaskAction;
 import dev.agentcraft.client.console.ConsoleLog.Tone;
 import dev.agentcraft.client.decisions.DecisionQueue;
@@ -127,6 +128,15 @@ public final class ConsoleActions {
 			case Clear c -> {
 				ConsoleLog.remember(raw);
 				ConsoleLog.clearLocal();
+				clearFeedback();
+				return After.CLEAR;
+			}
+			case Theme th -> {
+				ConsoleLog.remember(raw);
+				if (th.dark() != null) {
+					dev.agentcraft.client.ui.UiStyle.setDark(th.dark());
+				}
+				ConsoleLog.add(Tone.INFO, "Theme: " + (dev.agentcraft.client.ui.UiStyle.dark() ? "dark" : "light") + " (screens opened from now on)");
 				clearFeedback();
 				return After.CLEAR;
 			}

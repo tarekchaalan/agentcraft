@@ -503,7 +503,7 @@ final class MdLayout {
 			switch (o.kind) {
 				case TEXT -> g.text(font, o.text, x, yy, o.color, false);
 				case FILL -> g.fill(x, yy, x + o.w, yy + o.h, o.color);
-				case SPRITE -> g.blitSprite(net.minecraft.client.renderer.RenderPipelines.GUI_TEXTURED, o.sprite, x, yy, o.w, o.h);
+				case SPRITE -> dev.agentcraft.client.ui.Panels.sprite(g, o.sprite, x, yy, o.w, o.h);
 				case TASKDOT -> {
 					String fam = status.family(o.taskId);
 					if ("cancelled".equals(fam)) {

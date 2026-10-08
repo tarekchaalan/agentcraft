@@ -24,6 +24,11 @@ import java.util.Map;
  * UiStyle.agentOnDark("kit")        // nameplate/HUD name colour; agentOnLight for paper GUIs
  * UiStyle.metric("metrics.gui_panel_padding", 8)
  * </pre>
+ *
+ * <p>Dark theme (the default; {@code AGENTCRAFT_THEME=light} or {@code /theme light} for paper):
+ * {@link #color} answers the {@code gui/ui-style-dark.json} value of a token when it has one, paper
+ * sprites are tinted dark ({@link #paperTint}) and {@link #agentOnLight} gives the on-dark colour.
+ * Light text drawn on clay buttons or ink tooltips asks {@link #base}, which ignores the theme.
  */
 public final class UiStyle {
 	public static final int CREAM = 0xFFF4EFE6;
@@ -38,10 +43,22 @@ public final class UiStyle {
 
 	private static final Map<String, Integer> COLORS = new HashMap<>();
 	private static final Map<String, Double> NUMBERS = new HashMap<>();
+	private static final Map<String, Integer> DARK = new HashMap<>();
+	private static volatile boolean dark = !"light".equalsIgnoreCase(System.getenv("AGENTCRAFT_THEME"));
 
 	static {
-		load("/assets/agentcraft/gui/ui-style.json", "");
-		load("/assets/agentcraft/palette.json", "palette.");
+		load("/assets/agentcraft/gui/ui-style.json", "", COLORS);
+		load("/assets/agentcraft/palette.json", "palette.", COLORS);
+		load("/assets/agentcraft/gui/ui-style-dark.json", "", DARK);
+	}
+
+	/** The dark theme is on (screens and HUD; the in-world monitors have their own look). */
+	public static boolean dark() {
+		return dark;
+	}
+
+	public static void setDark(boolean on) {
+		dark = on;
 	}
 
 	private UiStyle() {
@@ -49,7 +66,7 @@ public final class UiStyle {
 
 	/** Opaque ARGB colour for a token path, e.g. "paper.text", "palette.colors.clay", "palette.ui.panel". */
 	public static int color(String path) {
-		Integer c = COLORS.get(path);
+		Integer c = dark ? DARK.getOrDefault(path, COLORS.get(path)) : COLORS.get(path);
 		if (c == null) {
 			AgentCraft.LOGGER.debug("UiStyle: unknown colour token {}", path);
 			return 0xFFFF00FF;
@@ -58,8 +75,39 @@ public final class UiStyle {
 	}
 
 	public static int color(String path, int fallback) {
+		Integer c = dark ? DARK.getOrDefault(path, COLORS.get(path)) : COLORS.get(path);
+		return c == null ? fallback : c;
+	}
+
+	/** {@link #base(String, int)} for a token that must exist (magenta when it does not). */
+	public static int base(String path) {
+		return base(path, 0xFFFF00FF);
+	}
+
+	/** The token's own (light theme) colour whatever the theme: light text on clay or ink surfaces. */
+	public static int base(String path, int fallback) {
 		Integer c = COLORS.get(path);
 		return c == null ? fallback : c;
+	}
+
+	/**
+	 * Tint for a paper sprite (panels, insets, fields, pills, plain buttons, task cards) in the dark
+	 * theme, or -1 (light theme, or a sprite that keeps its colours: clay buttons, dots, icons...).
+	 */
+	public static int paperTint(net.minecraft.resources.Identifier sprite) {
+		if (!dark || !Kit.isPaper(sprite)) {
+			return -1;
+		}
+		return Kit.isControl(sprite) ? DARK.getOrDefault("paper_tint.control", 0xFF3A342E) : DARK.getOrDefault("paper_tint.panel", 0xFF2E2925);
+	}
+
+	/** Per-channel product of two ARGB colours (a tint applied on top of another). */
+	public static int multiply(int a, int b) {
+		int r = 0;
+		for (int shift = 0; shift <= 24; shift += 8) {
+			r |= ((((a >>> shift) & 0xFF) * ((b >>> shift) & 0xFF)) / 255) << shift;
+		}
+		return r;
 	}
 
 	/** Status colour by family (idle, thinking, working, waiting, error, done). */
@@ -79,6 +127,11 @@ public final class UiStyle {
 
 	/** Agent name colour on paper GUIs. Unknown agent: ink. */
 	public static int agentOnLight(String agentId) {
+		return dark ? agentOnDark(agentId) : agentOnPaper(agentId);
+	}
+
+	/** Agent name colour on a paper surface whatever the theme (paper monitors and boards in the world). */
+	public static int agentOnPaper(String agentId) {
 		Integer c = COLORS.get("agents." + agentId + ".text_on_light");
 		if (c != null) {
 			return c;
@@ -97,30 +150,30 @@ public final class UiStyle {
 		return (Math.max(0, Math.min(255, alpha)) << 24) | (argb & 0xFFFFFF);
 	}
 
-	private static void load(String resource, String prefix) {
+	private static void load(String resource, String prefix, Map<String, Integer> colors) {
 		try (InputStream in = UiStyle.class.getResourceAsStream(resource)) {
 			if (in == null) {
 				AgentCraft.LOGGER.warn("UiStyle: {} missing (run assets-src/sync.py)", resource);
 				return;
 			}
 			JsonObject root = JsonParser.parseReader(new InputStreamReader(in, StandardCharsets.UTF_8)).getAsJsonObject();
-			walk(root, prefix.isEmpty() ? "" : prefix.substring(0, prefix.length() - 1));
+			walk(root, prefix.isEmpty() ? "" : prefix.substring(0, prefix.length() - 1), colors);
 		} catch (Exception e) {
 			AgentCraft.LOGGER.warn("UiStyle: could not read {}", resource, e);
 		}
 	}
 
-	private static void walk(JsonElement el, String path) {
+	private static void walk(JsonElement el, String path, Map<String, Integer> colors) {
 		if (el.isJsonObject()) {
 			for (var e : el.getAsJsonObject().entrySet()) {
-				walk(e.getValue(), path.isEmpty() ? e.getKey() : path + "." + e.getKey());
+				walk(e.getValue(), path.isEmpty() ? e.getKey() : path + "." + e.getKey(), colors);
 			}
 		} else if (el.isJsonPrimitive()) {
 			var p = el.getAsJsonPrimitive();
 			if (p.isString()) {
 				int c = Cast.parseColor(p.getAsString(), -1);
 				if (c != -1 && p.getAsString().startsWith("#")) {
-					COLORS.put(path, 0xFF000000 | c);
+					colors.put(path, 0xFF000000 | c);
 				}
 			} else if (p.isNumber()) {
 				NUMBERS.put(path, p.getAsDouble());

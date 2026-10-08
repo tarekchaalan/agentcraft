@@ -142,7 +142,7 @@ public class ConsoleTerminalRenderer extends StationRenderer<ConsoleTerminalBloc
 			feed.add(0, it.next());
 		}
 		List<FeedRow> out = new ArrayList<>();
-		int ink = UiStyle.color("monitor.text", 0xFF1F1E1D);
+		int ink = UiStyle.base("monitor.text", 0xFF1F1E1D);
 		int textW = SW - 8;
 		for (FeedItem f : feed) {
 			String agent = f.agentId();
@@ -151,13 +151,13 @@ public class ConsoleTerminalRenderer extends StationRenderer<ConsoleTerminalBloc
 			int nameColor;
 			if (agent == null) {
 				name = "Foreman";
-				nameColor = UiStyle.color("monitor.muted", 0xFF655E55);
+				nameColor = UiStyle.base("monitor.muted", 0xFF655E55);
 			} else if (UiBits.isUser(agent)) {
 				name = "You";
 				nameColor = UiStyle.CLAY_DARK;
 			} else {
 				name = UiBits.agentName(agent);
-				nameColor = UiBits.nameOnLight(agent);
+				nameColor = UiBits.nameOnPaper(agent);
 			}
 			// "Kit: tests fail" / "<user> answered" -> the name line already says who
 			for (String who : new String[] {name, UiBits.userName()}) {
@@ -171,9 +171,9 @@ public class ConsoleTerminalRenderer extends StationRenderer<ConsoleTerminalBloc
 				text = Character.toUpperCase(text.charAt(0)) + text.substring(1);
 			}
 			int color = switch (f.kind()) {
-				case ERROR -> UiStyle.color("monitor.error", 0xFF9A2F2B);
-				case MERGE -> UiStyle.color("monitor.result", 0xFF485A48);
-				case CI -> text.contains("fail") && !text.contains("fail 0") ? UiStyle.color("monitor.error", 0xFF9A2F2B) : UiStyle.color("monitor.result",
+				case ERROR -> UiStyle.base("monitor.error", 0xFF9A2F2B);
+				case MERGE -> UiStyle.base("monitor.result", 0xFF485A48);
+				case CI -> text.contains("fail") && !text.contains("fail 0") ? UiStyle.base("monitor.error", 0xFF9A2F2B) : UiStyle.base("monitor.result",
 					0xFF485A48);
 				case DECISION -> text.contains("needs you") ? UiStyle.CLAY_DARK : ink;
 				default -> ink;
@@ -221,10 +221,10 @@ public class ConsoleTerminalRenderer extends StationRenderer<ConsoleTerminalBloc
 
 		// the warm e-ink paper with its scanlines and a title band, drawn opaque in the solid pass (like
 		// nameplates) a hair behind the text plane, so text, faces and dots always win the depth test
-		int bg = UiStyle.color("monitor.bg", 0xFFEDE5D7);
-		int scan = UiStyle.color("monitor.scanline", 0xFFE7DECE);
-		int band = UiStyle.color("palette.ui.panel_shade", 0xFFE3DACB);
-		int rule = UiStyle.color("monitor.rule", 0xFFCFC2AC);
+		int bg = UiStyle.base("monitor.bg", 0xFFEDE5D7);
+		int scan = UiStyle.base("monitor.scanline", 0xFFE7DECE);
+		int band = UiStyle.base("palette.ui.panel_shade", 0xFFE3DACB);
+		int rule = UiStyle.base("monitor.rule", 0xFFCFC2AC);
 		poseStack.pushPose();
 		poseStack.translate(0, 0, 0.0012f);
 		solidRect(poseStack, collector, 0, 0, SW, SH, bg, light);
@@ -236,8 +236,8 @@ public class ConsoleTerminalRenderer extends StationRenderer<ConsoleTerminalBloc
 		poseStack.popPose();
 
 		Font font = Minecraft.getInstance().font;
-		int ink = UiStyle.color("monitor.text", 0xFF1F1E1D);
-		int muted = UiStyle.color("monitor.muted", 0xFF655E55);
+		int ink = UiStyle.base("monitor.text", 0xFF1F1E1D);
+		int muted = UiStyle.base("monitor.muted", 0xFF655E55);
 
 		// title band: while decisions wait it says so (pulsing clay dot, "2 waiting", the key); else
 		// "Console" with a status dot (sage = live, grey + "offline")
@@ -254,7 +254,7 @@ public class ConsoleTerminalRenderer extends StationRenderer<ConsoleTerminalBloc
 			poseStack.translate(0, 0, 0.0006f);
 			WorldUi.submitNineSlice(poseStack, collector, WorldUi.Layer.SOLID, Kit.KEYCAP, kx, 0.5f, kw, 10, 0xFFFFFFFF, light);
 			poseStack.popPose();
-			WorldUi.submitText(poseStack, collector, key, kx + 3, 2, UiStyle.color("palette.ui.text", 0xFF1F1E1D), light);
+			WorldUi.submitText(poseStack, collector, key, kx + 3, 2, UiStyle.base("palette.ui.text", 0xFF1F1E1D), light);
 		} else {
 			WorldUi.submitText(poseStack, collector, "Console", 4, 2, ink, light);
 			String right = s.live && s.stale ? "offline" : "";
@@ -290,7 +290,7 @@ public class ConsoleTerminalRenderer extends StationRenderer<ConsoleTerminalBloc
 			if (s.pages > 1) {
 				float px = SW - 4 - (s.pages * 4 - 1);
 				for (int i = 0; i < s.pages; i++) {
-					int c = i == s.pages - 1 - s.page ? ink : UiStyle.color("monitor.rule", 0xFFCFC2AC);
+					int c = i == s.pages - 1 - s.page ? ink : UiStyle.base("monitor.rule", 0xFFCFC2AC);
 					WorldUi.submitFill(poseStack, collector, px + i * 4, y + 3, px + i * 4 + 3, y + 6, c, light);
 				}
 			}
@@ -303,7 +303,7 @@ public class ConsoleTerminalRenderer extends StationRenderer<ConsoleTerminalBloc
 
 		// prompt: your draft, or how to start typing here
 		float py = SH - 10;
-		WorldUi.submitText(poseStack, collector, ">", 4, py, UiStyle.color("monitor.tool", 0xFF624E16), light);
+		WorldUi.submitText(poseStack, collector, ">", 4, py, UiStyle.base("monitor.tool", 0xFF624E16), light);
 		float cx = 12;
 		if (!s.draft.isEmpty()) {
 			WorldUi.submitText(poseStack, collector, s.draft, cx, py, ink, light);

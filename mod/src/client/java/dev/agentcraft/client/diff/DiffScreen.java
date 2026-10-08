@@ -444,7 +444,7 @@ public final class DiffScreen extends Screen {
 		int x = Math.min(width - w - 2, mx + 6);
 		int y = Math.max(2, my - 20);
 		Panels.sprite(g, Kit.TOOLTIP, x, y, w, 16);
-		g.text(font, text, x + 5, y + 5, UiStyle.color("palette.ui.panel"), false);
+		g.text(font, text, x + 5, y + 5, UiStyle.base("palette.ui.panel", UiStyle.CREAM), false);
 	}
 
 	// ------------------------------------------------------------------ header

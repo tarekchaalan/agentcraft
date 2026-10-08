@@ -865,9 +865,9 @@ final class TaskBoard {
 		o.size = c.size;
 		boolean blocked = t.status() == TaskStatus.BLOCKED;
 		boolean done = t.status() == TaskStatus.DONE;
-		int ink = UiStyle.color("paper.text", 0xFF1F1E1D);
-		int muted = UiStyle.color("paper.muted", 0xFF655E55);
-		int error = UiStyle.color("paper.del_fg", 0xFF873C2A);
+		int ink = UiStyle.base("paper.text", 0xFF1F1E1D);
+		int muted = UiStyle.base("paper.muted", 0xFF655E55);
+		int error = UiStyle.base("paper.del_fg", 0xFF873C2A);
 		o.titleColor = done ? muted : ink;
 		Kit.Padding p = Kit.padding("card_todo");
 		int inner = (int) (c.tw - p.left() - p.right());
@@ -908,7 +908,7 @@ final class TaskBoard {
 		if (assignee != null) {
 			nameText = a != null ? a.name() : assignee;
 			o.face = portrait(assignee);
-			o.nameColor = UiStyle.agentOnLight(assignee);
+			o.nameColor = UiStyle.agentOnPaper(assignee);
 			if (!done && a != null && a.isActive() && t.id().equals(a.taskId())) {
 				o.dot = a.state().family();
 			}

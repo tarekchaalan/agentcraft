@@ -115,9 +115,9 @@ public final class ReviewKit {
 		Panels.sprite(g, Kit.button(primary, state), x, y, w, 20);
 		int color;
 		if (disabled) {
-			color = primary ? UiStyle.color("palette.ui.panel") : UiStyle.color("paper.disabled");
+			color = primary ? UiStyle.base("palette.ui.panel", UiStyle.CREAM) : UiStyle.color("paper.disabled");
 		} else if (primary) {
-			color = UiStyle.color("palette.ui.panel_hi");
+			color = UiStyle.base("palette.ui.panel_hi", 0xFFFFFBF4);
 		} else if (kind == ButtonKind.DANGER) {
 			color = UiStyle.color("paper.del_fg");
 		} else {
@@ -236,7 +236,7 @@ public final class ReviewKit {
 		}
 		g.fill(x, y, x + size, y + size, agentIdentity(id));
 		String i = id == null || id.isEmpty() ? "?" : id.substring(0, 1).toUpperCase();
-		g.text(font, i, x + (size - font.width(i) + 1) / 2, y + (size - 8) / 2 + 1, UiStyle.color("palette.ui.panel_hi"), false);
+		g.text(font, i, x + (size - font.width(i) + 1) / 2, y + (size - 8) / 2 + 1, UiStyle.base("palette.ui.panel_hi", 0xFFFFFBF4), false);
 	}
 
 	/** The 20x20 framed portrait (brass rim + identity ring). */

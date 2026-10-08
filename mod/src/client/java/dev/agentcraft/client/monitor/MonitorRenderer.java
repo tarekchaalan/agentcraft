@@ -251,7 +251,7 @@ public class MonitorRenderer extends StationRenderer<MonitorBlockEntity, Monitor
 		int light = LightCoordsUtil.pack(Math.max(4, LightCoordsUtil.block(s.worldLight)), LightCoordsUtil.sky(s.worldLight));
 		ps.pushPose();
 		ps.translate(0, 0, Z_TEXT);
-		int muted = UiStyle.color("status.idle", 0xFF9C9488);
+		int muted = UiStyle.base("status.idle", 0xFF9C9488);
 		String label = m.mode == MonitorScreen.Mode.OFF_SHIFT ? "off shift" : "screen off";
 		WorldUi.submitText(ps, c, label, m.cx0, m.by1 - MonitorScreen.PAD_BOTTOM - 9, muted, light);
 		ps.popPose();
