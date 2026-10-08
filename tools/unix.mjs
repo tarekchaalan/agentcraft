@@ -28,6 +28,7 @@ function usage(code = 0) {
                             [--summary-json PATH]
                             [--foreman-arg VALUE] (repeatable)
   node tools/unix.mjs stop [--game] [--foreman] [--profile NAME] [--stop-daemon]
+  node tools/unix.mjs login    sign the agents' Claude Code in (needed once for --use-claude-login)
 
 Default: Claude backend, ~/.agentcraft, ports 7878/7879. --dev mutes the game,
 keeps it from taking focus, and disables desktop notifications.`);
@@ -50,7 +51,7 @@ function options(argv) {
     } else if (switches.has(key)) out[key] = true;
     else throw new Error(`unknown option: --${key}`);
   }
-  if (!['launch', 'stop'].includes(out.action)) usage(out.action ? 2 : 0);
+  if (!['launch', 'stop', 'login'].includes(out.action)) usage(out.action ? 2 : 0);
   out.backend ??= process.env.AGENTCRAFT_BACKEND || 'claude';
   if (out.showcase) {
     if (!['busy', 'late'].includes(out.showcase)) throw new Error('showcase must be busy or late');
@@ -139,6 +140,24 @@ function start(command, args, cwd, log, env = {}) {
   return { pid: child.pid, stamp: processStamp(child.pid), log, startedAt: new Date().toISOString() };
 }
 
+// The Claude Code CLI the agent SDK runs. Its login is separate from the Claude desktop app's.
+function claudeCli() {
+  installDeps(path.join(root, 'foreman'));
+  const bundled = path.join(root, 'foreman', 'node_modules', '@anthropic-ai', `claude-agent-sdk-${process.platform}-${process.arch}`, 'claude');
+  return fs.existsSync(bundled) ? bundled : 'claude';
+}
+
+function claudeLoggedIn() {
+  const result = spawnSync(claudeCli(), ['auth', 'status'], { encoding: 'utf8', timeout: 30000 });
+  try { return JSON.parse(result.stdout).loggedIn === true; } catch { return false; }
+}
+
+function login() {
+  const result = spawnSync(claudeCli(), ['auth', 'login'], { stdio: 'inherit' });
+  if (result.status !== 0 || !claudeLoggedIn()) throw new Error('Claude login did not complete');
+  console.log('Claude login ok. Now launch with --backend claude --use-claude-login.');
+}
+
 function runCli(script, args, timeout = 30000) {
   const result = spawnSync(process.execPath, [path.join(tools, script), ...args], { cwd: root, encoding: 'utf8', timeout });
   if (result.status !== 0) throw new Error(`${script}: ${result.stdout || result.stderr}`.trim());
@@ -184,6 +203,9 @@ async function launch(opt, summary) {
     if (!fs.existsSync(path.join(repo, '.git'))) throw new Error(`not a Git repository root: ${repo}`);
   }
   installDeps(tools);
+  if (opt.backend === 'claude' && opt['use-claude-login'] && !opt['no-foreman'] && !claudeLoggedIn()) {
+    throw new Error('the agents\' Claude Code is not signed in (the Claude desktop app login is separate). Run: node tools/unix.mjs login');
+  }
   const fmFile = runFile('foreman', opt.profile);
   let fm = readJson(fmFile);
   let fmPort = opt.port;
@@ -291,7 +313,8 @@ try {
     const summary = { foreman: { started: false, port: opt.port }, game: { started: false, devPort: opt['dev-port'] } };
     try { await launch(opt, summary); }
     finally { if (opt['summary-json']) saveJson(path.resolve(opt['summary-json']), summary); }
-  } else await stop(opt);
+  } else if (opt.action === 'login') login();
+  else await stop(opt);
 } catch (error) {
   console.error(`AgentCraft: ${error.message}`);
   process.exitCode = 1;
