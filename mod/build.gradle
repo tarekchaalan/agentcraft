@@ -54,6 +54,17 @@ dependencies {
 	include("org.java-websocket:Java-WebSocket:${project.java_websocket_version}") {
 		exclude group: 'org.slf4j'
 	}
+
+	// Unit tests: pure-logic classes only (no running Minecraft). Client classes live in the split client source set.
+	testImplementation sourceSets.client.output
+	testImplementation sourceSets.client.compileClasspath
+	testImplementation platform("org.junit:junit-bom:5.11.4")
+	testImplementation "org.junit.jupiter:junit-jupiter"
+	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+tasks.named("test") {
+	useJUnitPlatform()
 }
 
 processResources {
