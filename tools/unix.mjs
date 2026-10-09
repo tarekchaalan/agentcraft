@@ -158,6 +158,11 @@ function login() {
   console.log('Claude login ok. Now launch with --backend claude --use-claude-login.');
 }
 
+function foremanAuthFailed(port) {
+  try { return JSON.parse(runCli('foremancli.mjs', ['status', '--json', '--port', String(port)])).foreman?.auth === 'failed'; }
+  catch { return false; }
+}
+
 function runCli(script, args, timeout = 30000) {
   const result = spawnSync(process.execPath, [path.join(tools, script), ...args], { cwd: root, encoding: 'utf8', timeout });
   if (result.status !== 0) throw new Error(`${script}: ${result.stdout || result.stderr}`.trim());
@@ -210,6 +215,12 @@ async function launch(opt, summary) {
   let fm = readJson(fmFile);
   let fmPort = opt.port;
   if (!opt['no-foreman']) {
+    if (owned(fm) && await portOpen(fm.port) && foremanAuthFailed(fm.port)) {
+      // a Foreman that failed its Claude check keeps failing until restarted; reusing it would hide a fixed login
+      console.log(`Foreman ${fm.pid} failed its Claude auth check; restarting it`);
+      await stop({ ...opt, foreman: true, game: false });
+      fm = null;
+    }
     if (owned(fm) && await portOpen(fm.port)) {
       fmPort = fm.port;
       summary.foreman.port = fmPort;
