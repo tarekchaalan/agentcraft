@@ -44,6 +44,42 @@ Windows PowerShell 5.1 or PowerShell 7 (`pwsh -File tools\launch.ps1 ...`) and N
 first run (`npm ci` in `foreman/` and `tools/`); the Gradle wrapper downloads Gradle, Minecraft
 and Fabric by itself. Java 25 must be installed (Temurin 25: https://adoptium.net).
 
+### Guided start
+
+`start-agentcraft.cmd` in the repository root (double-click it, or run it from cmd.exe) runs
+`tools\start-agentcraft.ps1`, which does the checking so you do not have to:
+
+1. The checkout itself, free disk space, and whether `winget` is available.
+2. **Git**: offers `winget install Git.Git`.
+3. **Node.js 22+**: offers `nvm install 22` if you have nvm-windows, else winget
+   (`OpenJS.NodeJS.LTS`) or a portable copy in `%LOCALAPPDATA%\Programs\nodejs` added to your user
+   PATH.
+4. **Java 25 JDK**: finds one in `JAVA_HOME` or the usual install folders (Temurin, Oracle,
+   Microsoft, Zulu, Corretto, `~/.jdks`); else offers a portable Temurin 25 from
+   api.adoptium.net into `%LOCALAPPDATA%\Programs\Eclipse Adoptium`. No admin rights, nothing else
+   on the machine changes; `JAVA_HOME` is set for that launch only.
+5. **How the agents run**: your Claude login (installs the `claude` CLI with Anthropic's installer
+   if missing and runs `claude auth login` if you are not logged in), an API key you paste (kept
+   for that launch only), or the free simulated team. `-Backend codex` checks for the Codex CLI.
+6. The repository the agents should work in (Enter = the demo repo in `sandbox/`), the world
+   (Studio or Survival), then `tools\launch.ps1` with the matching arguments.
+
+Every install is asked about first (yes / skip / quit), waited for, and checked again
+afterwards; an internet check runs before any download. Each run is logged to
+`artifacts\logs\start-<timestamp>.log`. Exit codes: 0 ok, 1 something is still missing, 2 you
+quit, 3 the launch failed, 4 unexpected error; the window stays open on any of them.
+
+| argument | |
+| --- | --- |
+| `studio` / `survival` (or `-World`) | which world, skips the question |
+| `-Repo <path>` | repository to register, skips the question |
+| `-Backend sim\|claude\|codex` | as for `launch.ps1` |
+| `-UseClaudeLogin` | login mode without being asked |
+| `-Check` | only check and offer installs, do not launch |
+| `-Yes` | unattended: every question gets its default (installs included) |
+| `-NoInstall` | never install, just report |
+| `-LaunchArgs '-Dev','-Seed','1234'` | passed through to `launch.ps1` |
+
 ## Daily use
 
 ```powershell

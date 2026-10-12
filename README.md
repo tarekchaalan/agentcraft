@@ -187,6 +187,13 @@ tools\launch.ps1 -Repo C:\path\to\your\repo      # real agents on your repo
 tools\stop.ps1                                   # stop everything launch.ps1 started
 ```
 
+**On Windows, the easy way:** double-click `start-agentcraft.cmd` in the checkout. It checks for
+git, Node.js 22, a Java 25 JDK and your Claude login, offers to install whatever is missing (and
+waits for it), asks how the agents should run, which repository to work in and which world to
+open, then starts everything. `start-agentcraft.cmd survival` skips the world question,
+`start-agentcraft.cmd -Check` only reports what is installed. See
+[tools/README.md](tools/README.md#guided-start).
+
 On macOS, install Java 25 with `brew install openjdk@25`. On Linux, install your distribution's
 Java 25 JDK (on Arch: `pacman -S jdk25-openjdk`) or point `JAVA_HOME` at one. Then run from the
 checkout (the script selects that JDK without changing your system Java):
