@@ -15,7 +15,9 @@ import net.minecraft.client.Minecraft;
  * AGENTCRAFT_DEV        1 enables the DevBridge, 0 disables it
  * AGENTCRAFT_MUTE       1 forces master+music volume to 0 at startup; 0 keeps your volume
  * AGENTCRAFT_FOCUS      0 = the window opens WITHOUT taking focus; 1 = normal focus
- * AGENTCRAFT_AUTOWORLD  1 = create/load the "AgentCraft HQ" world on startup; 0 = title screen
+ * AGENTCRAFT_AUTOWORLD  1 = create/load the AgentCraft world on startup; 0 = title screen
+ * AGENTCRAFT_WORLD      which world: studio ("AgentCraft HQ", default) or survival ("AgentCraft Survival")
+ * AGENTCRAFT_WORLD_SEED seed of a world created on this start (number or text); see dev.agentcraft.world.WorldProfile
  * AGENTCRAFT_SHOTS_DIR  where dev.screenshot writes PNGs (default &lt;repo&gt;/artifacts/shots)
  * </pre>
  *

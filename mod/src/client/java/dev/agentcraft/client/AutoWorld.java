@@ -1,9 +1,11 @@
 package dev.agentcraft.client;
 
 import dev.agentcraft.AgentCraft;
-import dev.agentcraft.world.HqWorld;
+import dev.agentcraft.world.WorldProfile;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
+import java.util.function.Function;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.Minecraft;
@@ -30,13 +32,18 @@ import net.minecraft.world.level.levelgen.flat.FlatLevelGeneratorSettings;
 import net.minecraft.world.level.levelgen.presets.WorldPresets;
 
 /**
- * Boots straight into the "AgentCraft HQ" world without any clicks: the first time the title
- * screen appears, the world is loaded if it exists, or created (creative, peaceful, superflat
- * grass meadow with no structures/decoration) if it does not. Disable with AGENTCRAFT_AUTOWORLD=0.
+ * Boots straight into the AgentCraft world without any clicks: the first time the title screen
+ * appears, the selected profile's world ({@link WorldProfile}: the studio "AgentCraft HQ" by
+ * default, "AgentCraft Survival" with {@code AGENTCRAFT_WORLD=survival}) is loaded if it exists,
+ * or created if it does not. The studio is creative, peaceful, a superflat grass meadow with no
+ * structures or decoration; survival is a normal world in survival mode. Disable with
+ * AGENTCRAFT_AUTOWORLD=0.
  */
 public final class AutoWorld {
+	/** Seed of every studio world: the same meadow for everyone (there is nothing to see in it anyway). */
+	private static final long STUDIO_SEED = "agentcraft-hq".hashCode();
 	private static boolean attempted;
-	/** True while AutoWorld itself is opening the HQ world (so its confirm screens may be auto-answered). */
+	/** True while AutoWorld itself is opening the world (so its confirm screens may be auto-answered). */
 	private static boolean openingHq;
 
 	private AutoWorld() {
@@ -50,12 +57,12 @@ public final class AutoWorld {
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> openingHq = false);
 		ScreenEvents.AFTER_INIT.register((client, screen, w, h) -> {
 			if (openingHq && screen instanceof BackupConfirmScreen backup) {
-				// Registry content changed since the HQ world was saved (a block/entity was renamed or removed
-				// while developing). The HQ world is generated, so take Fabric's backup and load it instead of
+				// Registry content changed since the world was saved (a block/entity was renamed or removed
+				// while developing). The HQ is generated, so take Fabric's backup and load it instead of
 				// waiting forever on "Missing content detected!" in an unattended run.
 				openingHq = false;
 				AgentCraft.LOGGER.warn("AutoWorld: '{}' needs confirmation ({}); making a backup and loading it",
-					HqWorld.LEVEL_NAME, screen.getTitle().getString());
+					WorldProfile.selected().levelName(), screen.getTitle().getString());
 				client.execute(() -> ((BackupConfirmScreenAccessor) backup).agentcraft$onProceed().proceed(true, false));
 				return;
 			}
@@ -71,27 +78,47 @@ public final class AutoWorld {
 	}
 
 	public static void openOrCreate(Minecraft mc) {
+		WorldProfile profile = WorldProfile.selected();
+		String name = profile.levelName();
 		try {
-			if (mc.getLevelSource().levelExists(HqWorld.LEVEL_NAME)) {
-				AgentCraft.LOGGER.info("AutoWorld: loading existing world '{}'", HqWorld.LEVEL_NAME);
+			if (mc.getLevelSource().levelExists(name)) {
+				AgentCraft.LOGGER.info("AutoWorld: loading existing {} world '{}'", profile.id(), name);
 				openingHq = true;
-				mc.createWorldOpenFlows().openWorld(HqWorld.LEVEL_NAME, () -> mc.gui.setScreen(new TitleScreen()));
+				mc.createWorldOpenFlows().openWorld(name, () -> mc.gui.setScreen(new TitleScreen()));
 			} else {
-				AgentCraft.LOGGER.info("AutoWorld: creating world '{}'", HqWorld.LEVEL_NAME);
-				LevelSettings settings = new LevelSettings(
-					HqWorld.LEVEL_NAME,
-					GameType.CREATIVE,
-					new LevelSettings.DifficultySettings(Difficulty.PEACEFUL, false, false),
-					true,
-					WorldDataConfiguration.DEFAULT
-				);
-				WorldOptions options = new WorldOptions("agentcraft-hq".hashCode(), false, false);
-				mc.createWorldOpenFlows().createFreshLevel(HqWorld.LEVEL_NAME, settings, options, AutoWorld::meadowDimensions, new TitleScreen());
+				long seed = seed(profile);
+				AgentCraft.LOGGER.info("AutoWorld: creating {} world '{}' (seed {})", profile.id(), name, seed);
+				LevelSettings settings = profile.survival()
+					? new LevelSettings(name, GameType.SURVIVAL, new LevelSettings.DifficultySettings(Difficulty.NORMAL, false, false), true,
+						WorldDataConfiguration.DEFAULT)
+					: new LevelSettings(name, GameType.CREATIVE, new LevelSettings.DifficultySettings(Difficulty.PEACEFUL, false, false), true,
+						WorldDataConfiguration.DEFAULT);
+				// natural worlds get structures (villages, temples: that is the game); the meadow gets none
+				WorldOptions options = new WorldOptions(seed, profile.naturalTerrain(), false);
+				Function<HolderLookup.Provider, WorldDimensions> dimensions = profile.naturalTerrain()
+					? WorldPresets::createNormalWorldDimensions
+					: AutoWorld::meadowDimensions;
+				mc.createWorldOpenFlows().createFreshLevel(name, settings, options, dimensions, new TitleScreen());
 			}
 		} catch (Exception e) {
 			AgentCraft.LOGGER.error("AutoWorld failed; staying on the title screen", e);
 			mc.gui.setScreen(new TitleScreen());
 		}
+	}
+
+	/**
+	 * {@code AGENTCRAFT_WORLD_SEED} (a number, or any text hashed like the world-creation screen does)
+	 * when set; else the fixed studio seed, or a random seed for a natural world.
+	 */
+	static long seed(WorldProfile profile) {
+		String s = WorldProfile.raw(WorldProfile.SEED_ENV);
+		if (s != null) {
+			OptionalLong parsed = WorldOptions.parseSeed(s);
+			if (parsed.isPresent()) {
+				return parsed.getAsLong();
+			}
+		}
+		return profile.naturalTerrain() ? WorldOptions.randomSeed() : STUDIO_SEED;
 	}
 
 	/** Normal dimensions, with the overworld replaced by a flat plains meadow (grass top at y=64). */

@@ -7,12 +7,15 @@ import dev.agentcraft.command.AgentCraftCommands;
 import dev.agentcraft.layout.Anchor;
 import dev.agentcraft.layout.AnchorNames;
 import dev.agentcraft.layout.Anchors;
+import dev.agentcraft.world.HqSite;
 import dev.agentcraft.world.HqWorld;
+import dev.agentcraft.world.WorldProfile;
 import java.util.Locale;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import org.jspecify.annotations.Nullable;
 
@@ -36,8 +39,8 @@ public final class HqFeature {
 		HqBuilders.register(new TestRoomBuilder());
 		HqBuilders.register(new StudioHqBuilder());
 		HqBuilders.setDefault(StudioHqBuilder.ID);
-		// A fresh HQ world (no saved layout yet) gets the default HQ built before the player joins, so
-		// the first launch walks straight into it. AGENTCRAFT_HQ_AUTOBUILD=0 turns this off.
+		// A fresh AgentCraft world (no saved layout yet) gets the default HQ built before the player
+		// joins, so the first launch walks straight into it. AGENTCRAFT_HQ_AUTOBUILD=0 turns this off.
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
 			if (!HqWorld.isHq(server) || !Anchors.current().isEmpty() || !autoBuild()) {
 				return;
@@ -45,7 +48,7 @@ public final class HqFeature {
 			HqBuilder builder = HqBuilders.get(HqBuilders.defaultId());
 			if (builder != null) {
 				try {
-					buildAndPublish(server.overworld(), builder, HqBuilder.Options.DEFAULT);
+					buildAndPublish(server.overworld(), builder, optionsFor(server, false));
 					AgentCraft.LOGGER.info("Fresh HQ world: built the default HQ '{}'", builder.id());
 				} catch (RuntimeException e) {
 					AgentCraft.LOGGER.error("Auto-building the HQ failed (run /agentcraft hq)", e);
@@ -74,8 +77,8 @@ public final class HqFeature {
 
 	/**
 	 * Building rewrites a large area of terrain and moves the world spawn, so it only runs in the
-	 * AgentCraft HQ world unless AGENTCRAFT_HQ_ANYWORLD=1 (-Dagentcraft.hq.anyworld=1) opts in, and
-	 * never in a Hardcore world.
+	 * AgentCraft worlds (studio or survival) unless AGENTCRAFT_HQ_ANYWORLD=1 (-Dagentcraft.hq.anyworld=1)
+	 * opts in, and never in a Hardcore world.
 	 */
 	private static @Nullable String refusal(CommandSourceStack source) {
 		var server = source.getServer();
@@ -83,10 +86,29 @@ public final class HqFeature {
 			return "/agentcraft hq never builds in a Hardcore world (it rewrites terrain and moves the spawn)";
 		}
 		if (!HqWorld.isHq(server) && !anyWorld()) {
-			return "/agentcraft hq only builds in the \"" + HqWorld.LEVEL_NAME + "\" world; to build into this world on purpose,"
-				+ " back it up and start the game with -Dagentcraft.hq.anyworld=1";
+			return "/agentcraft hq only builds in the \"" + WorldProfile.STUDIO.levelName() + "\" and \"" + WorldProfile.SURVIVAL.levelName()
+				+ "\" worlds; to build into this world on purpose, back it up and start the game with -Dagentcraft.hq.anyworld=1";
 		}
 		return null;
+	}
+
+	/**
+	 * How the HQ is built in this world. The studio world builds the plain studio at the origin. A
+	 * natural world (the survival profile, or any other world opted in with AGENTCRAFT_HQ_ANYWORLD)
+	 * builds the survival-ready studio on the world's recorded HQ site, choosing one near the spawn
+	 * the first time and keeping it in the world's marker file, so every rebuild lands on the same ground.
+	 */
+	static HqBuilder.Options optionsFor(MinecraftServer server, boolean force) {
+		WorldProfile profile = HqWorld.profileOf(server);
+		if (profile != null && !profile.naturalTerrain()) {
+			return new HqBuilder.Options(force, null, profile.survival());
+		}
+		HqSite site = HqWorld.site(server);
+		if (site == null) {
+			site = HqTerrain.findSite(server.overworld());
+			HqWorld.saveSite(server, site);
+		}
+		return new HqBuilder.Options(force, site, profile == null || profile.survival());
 	}
 
 	private static boolean anyWorld() {
@@ -108,9 +130,15 @@ public final class HqFeature {
 			ctx.getSource().sendFailure(Component.literal("Unknown HQ builder '" + id + "' (known: " + HqBuilders.ids() + ")"));
 			return 0;
 		}
+		HqBuilder.Options options = optionsFor(ctx.getSource().getServer(), force);
+		if (options.site() != null && !(builder instanceof StudioHqBuilder)) {
+			// the test room builds at the origin whatever the world; on a natural site that is somewhere else entirely
+			ctx.getSource().sendFailure(Component.literal("HQ builder '" + id + "' only builds in the studio world (it does not know the HQ site)"));
+			return 0;
+		}
 		Anchors.Layout layout;
 		try {
-			layout = buildAndPublish(ctx.getSource().getLevel(), builder, new HqBuilder.Options(force));
+			layout = buildAndPublish(ctx.getSource().getLevel(), builder, options);
 		} catch (RuntimeException e) {
 			AgentCraft.LOGGER.error("HQ builder '{}' failed", id, e);
 			ctx.getSource().sendFailure(Component.literal("HQ builder '" + id + "' failed: " + e));

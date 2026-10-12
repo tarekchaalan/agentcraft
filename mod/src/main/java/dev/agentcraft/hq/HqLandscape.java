@@ -15,6 +15,7 @@ import java.util.List;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
@@ -48,6 +49,15 @@ final class HqLandscape {
 	private static final int[][] FLAT = {
 		{-29, -16, 29, 12}, {-20, 6, 20, 33}, {-37, 9, -10, 34}, {4, 29, 22, 45}, {-6, 25, 6, 49},
 	};
+	/**
+	 * Level areas a survival world adds behind the hall (north of the ring path): the crop farm to
+	 * the west, the animal pens to the east. Fence lines on the rect edges, see
+	 * {@code StudioHqBuilder.cropFarm/animalFarm}.
+	 */
+	static final int[] CROP_FARM = {-24, -31, -2, -17};
+	static final int[] ANIMAL_FARM = {2, -31, 24, -17};
+	/** One level area for both farms and the three columns between them (those blended a block up on their own). */
+	private static final int[][] FLAT_SURVIVAL = {{CROP_FARM[0], CROP_FARM[1], ANIMAL_FARM[2], ANIMAL_FARM[3]}};
 	/** The lychgate at the end of the main path. */
 	static final int GATE_Z = 48;
 
@@ -56,9 +66,27 @@ final class HqLandscape {
 		return t * t * (3 - 2 * t);
 	}
 
-	static double flatDistance(int x, int z) {
+	/** Distance to the nearest level area (0 inside one); a survival plan's farms count as level areas too. */
+	static double flatDistance(Plan p, int x, int z) {
+		double best = flatDistance(FLAT, x, z);
+		return p.survival() ? Math.min(best, flatDistance(FLAT_SURVIVAL, x, z)) : best;
+	}
+
+	/** No tree, planned or the world's own, within this many columns of a farm fence (survival plans). */
+	static final int FARM_CLEARANCE = 6;
+
+	/** Distance to the nearest farm rect (0 inside one); infinite when the plan has no farms. */
+	static double farmDistance(Plan p, int x, int z) {
+		return p.survival() ? flatDistance(FLAT_SURVIVAL, x, z) : Double.MAX_VALUE;
+	}
+
+	private static boolean nearFarm(Plan p, int x, int z) {
+		return farmDistance(p, x, z) < FARM_CLEARANCE;
+	}
+
+	private static double flatDistance(int[][] rects, int x, int z) {
 		double best = Double.MAX_VALUE;
-		for (int[] r : FLAT) {
+		for (int[] r : rects) {
 			double dx = Math.max(0, Math.max(r[0] - x, x - r[2]));
 			double dz = Math.max(0, Math.max(r[1] - z, z - r[3]));
 			best = Math.min(best, Math.sqrt(dx * dx + dz * dz));
@@ -72,22 +100,49 @@ final class HqLandscape {
 	}
 
 	/** Terrain height above the meadow (blocks): a rolling ring of hills near the box edges, level inside. */
-	static int terrainHeight(int x, int z) {
+	static int terrainHeight(Plan p, int x, int z) {
 		double e = edge(x, z);
 		double crest = 5.2 + 1.8 * Math.sin(x * 0.15 + z * 0.07) + 1.4 * Math.cos(z * 0.19 - x * 0.11) + 0.8 * Math.sin((x + z) * 0.31);
 		// rises from the plain at the box edge (no step where the site meets the world), crests ~7 in
 		double berm = e >= 7 ? crest * smooth(19, 7, e) : crest * smooth(-1, 7, e);
-		return (int) Math.round(berm * smooth(0, 7, flatDistance(x, z)));
+		return (int) Math.round(berm * smooth(0, 7, flatDistance(p, x, z)));
 	}
 
-	/** Shapes the ground before anything is built: dirt under a grass top at the terrain height. */
+	/**
+	 * Shapes the ground before anything is built: dirt under a grass top at the terrain height. In a
+	 * natural world ({@link Plan#hasNatural}) the planned ground is blended into the world's own
+	 * towards the site's edge, see {@link #naturalGround}.
+	 */
 	static void ground(Plan p) {
+		int nz = p.maxZ - p.minZ + 1;
+		int[] hs = plannedHeights(p);
+		if (p.hasNatural()) {
+			naturalGround(p, hs);
+			return;
+		}
+		for (int x = p.minX; x <= p.maxX; x++) {
+			for (int z = p.minZ; z <= p.maxZ; z++) {
+				int h = hs[(x - p.minX) * nz + (z - p.minZ)];
+				if (h <= 0) {
+					continue;
+				}
+				for (int y = GROUND; y < GROUND + h; y++) {
+					p.set(x, y, z, Blocks.DIRT.defaultBlockState());
+				}
+				p.set(x, GROUND + h, z, Blocks.GRASS_BLOCK.defaultBlockState());
+				p.setTop(x, z, GROUND + h);
+			}
+		}
+	}
+
+	/** The designed terrain height above the meadow per column ({@code [(x - minX) * sizeZ + (z - minZ)]}), hills smoothed to one-block steps. */
+	private static int[] plannedHeights(Plan p) {
 		int nx = p.maxX - p.minX + 1;
 		int nz = p.maxZ - p.minZ + 1;
 		int[] hs = new int[nx * nz];
 		for (int x = p.minX; x <= p.maxX; x++) {
 			for (int z = p.minZ; z <= p.maxZ; z++) {
-				hs[(x - p.minX) * nz + (z - p.minZ)] = terrainHeight(x, z);
+				hs[(x - p.minX) * nz + (z - p.minZ)] = terrainHeight(p, x, z);
 			}
 		}
 		// no cliffs: every step between neighbouring columns is at most one block, so the hills show
@@ -112,17 +167,134 @@ final class HqLandscape {
 				break;
 			}
 		}
+		return hs;
+	}
+
+	/** The outermost columns of a natural site are the world's own: nothing is planned there. */
+	static final int KEEP_BAND = 2;
+	/** Inward from the kept band, the ground goes from the world's height to the plan's over this many columns. */
+	static final int BLEND_BAND = 16;
+
+	/**
+	 * The ground of a site in a natural world. Every column gets a full new column (stone, three
+	 * dirt, grass, air) at a height between the world's own ground and the designed one: the
+	 * world's at the site's edge, the design's inside, with the level areas ({@link #FLAT}: the
+	 * building, the court, the pond, the garden, the path) always at their designed height, since
+	 * the things built on them sit at fixed heights. Where the world has water at the edge the
+	 * neighbouring ground never dips below its surface, so nothing runs in.
+	 */
+	private static void naturalGround(Plan p, int[] planned) {
+		int nz = p.maxZ - p.minZ + 1;
+		int[] hs = new int[(p.maxX - p.minX + 1) * nz];
+		for (int x = p.minX; x <= p.maxX; x++) {
+			for (int z = p.minZ; z <= p.maxZ; z++) {
+				int i = (x - p.minX) * nz + (z - p.minZ);
+				int e = edge(x, z);
+				if (e < KEEP_BAND) {
+					p.keepColumn(x, z);
+					hs[i] = Integer.MIN_VALUE;
+					continue;
+				}
+				double byEdge = smooth(KEEP_BAND, KEEP_BAND + BLEND_BAND, e);
+				double byFlat = 1 - smooth(0, 6, flatDistance(p, x, z));
+				double w = Math.max(byEdge, byFlat);
+				double design = GROUND + planned[i];
+				double natural = p.naturalTop(x, z);
+				int h = (int) Math.round(natural * (1 - w) + design * w);
+				hs[i] = Math.max(p.minY + 1, Math.min(p.maxY - 8, h));
+			}
+		}
+		// shores: a planned column next to a kept water column rises to that water's surface
+		for (int x = p.minX; x <= p.maxX; x++) {
+			for (int z = p.minZ; z <= p.maxZ; z++) {
+				int i = (x - p.minX) * nz + (z - p.minZ);
+				if (hs[i] == Integer.MIN_VALUE || edge(x, z) > KEEP_BAND + 1) {
+					continue;
+				}
+				for (int dx = -1; dx <= 1; dx++) {
+					for (int dz = -1; dz <= 1; dz++) {
+						if (p.isKept(x + dx, z + dz) && p.naturalWater(x + dx, z + dz)) {
+							hs[i] = Math.max(hs[i], p.naturalTop(x + dx, z + dz));
+						}
+					}
+				}
+			}
+		}
 		for (int x = p.minX; x <= p.maxX; x++) {
 			for (int z = p.minZ; z <= p.maxZ; z++) {
 				int h = hs[(x - p.minX) * nz + (z - p.minZ)];
-				if (h <= 0) {
+				if (h == Integer.MIN_VALUE) {
 					continue;
 				}
-				for (int y = GROUND; y < GROUND + h; y++) {
-					p.set(x, y, z, Blocks.DIRT.defaultBlockState());
+				column(p, x, z, h);
+			}
+		}
+	}
+
+	/** A full ground column with its grass top at {@code h}: stone, three dirt, grass, air above. */
+	private static void column(Plan p, int x, int z, int h) {
+		for (int y = p.minY; y <= p.maxY; y++) {
+			BlockState s = y > h ? Blocks.AIR.defaultBlockState() : y == h ? Blocks.GRASS_BLOCK.defaultBlockState()
+				: y >= h - 3 ? Blocks.DIRT.defaultBlockState() : Blocks.STONE.defaultBlockState();
+			p.set(x, y, z, s);
+		}
+		p.setTop(x, z, h);
+	}
+
+	/**
+	 * Survival worlds: a hidden light (an invisible light block, no model, no collision) every six
+	 * blocks over everything on the site that is open to the sky, roofs included, and a second one
+	 * at ground level where a canopy is in the way. Hostile mobs need block light 0 to spawn; with
+	 * level 10 sources six apart nothing on the site ever gets darker than about 4, while the night
+	 * still reads as night. The interiors have their own light.
+	 *
+	 * <p>Columns the plan leaves to the world (the kept edge band and, in a survival plan, the
+	 * lighting margin around the site, {@code StudioHqBuilder.LIGHT_MARGIN}) get the same lattice
+	 * one block above the world's own ground, where that cell is air or a plant: the only thing
+	 * written there, so the surroundings stay as generated but nothing spawns in them either.
+	 */
+	/**
+	 * Survival worlds: the columns the plan leaves to the world (the kept edge band, the lighting
+	 * margin) that lie within {@link #FARM_CLEARANCE} of a farm are marked for felling: whatever tree
+	 * the world grew there (logs, leaves, vines) comes down when the plan is applied, the ground
+	 * under it stays as it is. Columns the plan writes are rebuilt from the ground up anyway, and no
+	 * planned tree stands that close to a farm ({@link #trees}), so the farms sit in the open.
+	 */
+	static void farmClearing(Plan p) {
+		if (!p.hasNatural()) {
+			return;
+		}
+		for (int x = p.minX; x <= p.maxX; x++) {
+			for (int z = p.minZ; z <= p.maxZ; z++) {
+				if (p.isKept(x, z) && nearFarm(p, x, z)) {
+					p.clearCanopy(x, z);
 				}
-				p.set(x, GROUND + h, z, Blocks.GRASS_BLOCK.defaultBlockState());
-				p.setTop(x, z, GROUND + h);
+			}
+		}
+	}
+
+	static void spawnProofing(Plan p) {
+		BlockState light = St.light(10);
+		for (int x = p.minX; x <= p.maxX; x++) {
+			for (int z = p.minZ; z <= p.maxZ; z++) {
+				if (Math.floorMod(x, 6) != 0 || Math.floorMod(z, 6) != 0) {
+					continue;
+				}
+				if (p.isKept(x, z)) {
+					// a felled column is clear above its ground once the trunk is gone (felling runs before the writes)
+					if (p.hasNatural() && (p.naturalClearAbove(x, z) || p.canopyCleared(x, z))) {
+						p.setInKept(x, p.naturalTop(x, z) + 1, z, light);
+					}
+					continue;
+				}
+				int hi = p.highest(x, z);
+				if (hi >= p.minY && hi + 1 <= p.maxY) {
+					p.setIfAir(x, hi + 1, z, light);
+				}
+				int t = p.top(x, z);
+				if (t != hi && t + 1 <= p.maxY) {
+					p.setIfAir(x, t + 1, z, light);
+				}
 			}
 		}
 	}
@@ -132,6 +304,7 @@ final class HqLandscape {
 		portico(p);
 		paths(p);
 		gate(p);
+		frontWall(p);
 		pond(p);
 		garden(p);
 		trees(p);
@@ -360,13 +533,58 @@ final class HqLandscape {
 				path(p, x - side, z);
 			}
 		}
-		// a ring path around the back of the hall
+		// a ring path around the back of the hall, its south ends turning in along the terrace fronts
+		// to the terrace steps (and the lean-to doors), a lantern on each corner
 		for (int x = -HX - 3; x <= HX + 3; x++) {
 			path(p, x, HZN - 4);
 		}
-		for (int z = HZN - 4; z <= HZS + 6; z++) {
+		for (int z = HZN - 4; z <= HZS + 7; z++) {
 			path(p, -HX - 3, z);
 			path(p, HX + 3, z);
+		}
+		for (int x = StudioHqBuilder.LEAN_TO_DOOR_X + 1; x <= HX + 3; x++) {
+			path(p, x, HZS + 7);
+			path(p, -x, HZS + 7);
+		}
+		for (int sx : new int[] {-1, 1}) {
+			lanternPost(p, sx * (HX + 4), HZN - 5);
+			lanternPost(p, sx * (HX + 4), HZS + 8);
+		}
+	}
+
+	/**
+	 * The garden wall along the front of the site (z = {@link #GATE_Z}, x -26..26): a low mud-brick
+	 * wall with mossy stones in it, following the ground up into the hills at both ends, mud-brick
+	 * piers every eight blocks with a lantern on every other one, broken only by the lychgate, which
+	 * gets a dark oak gate between two fence panels. Visitors arrive through the gate; the hills
+	 * close the rest.
+	 */
+	private static void frontWall(Plan p) {
+		int z = GATE_Z;
+		int cx = pathX(z);
+		int y0 = p.top(cx, z) + 1;
+		p.set(cx - 1, y0, z, Blocks.DARK_OAK_FENCE.defaultBlockState());
+		p.set(cx + 1, y0, z, Blocks.DARK_OAK_FENCE.defaultBlockState());
+		p.set(cx, y0, z, Blocks.DARK_OAK_FENCE_GATE.defaultBlockState().setValue(FenceGateBlock.FACING, Direction.SOUTH)
+			.setValue(FenceGateBlock.OPEN, false));
+		for (int x = -26; x <= 26; x++) {
+			int d = Math.abs(x - cx);
+			if (d <= 2 || !meadowAt(p, x, z)) {
+				continue; // the lychgate (posts at cx +- 2), or something already there
+			}
+			int t = p.top(x, z);
+			boolean end = Math.abs(x) == 26;
+			boolean pier = (d - 3) % 8 == 0 || end;
+			if (pier) {
+				p.set(x, t + 1, z, StudioHqBuilder.PLINTH);
+				p.set(x, t + 2, z, StudioHqBuilder.PLINTH);
+				if ((d - 3) % 16 == 0 || end) {
+					p.set(x, t + 3, z, StudioHqBuilder.LANTERN);
+				}
+			} else {
+				p.set(x, t + 1, z, hash(x, z, 71) % 5 == 0 ? Blocks.MOSSY_COBBLESTONE_WALL.defaultBlockState()
+					: Blocks.MUD_BRICK_WALL.defaultBlockState());
+			}
 		}
 	}
 
@@ -590,7 +808,7 @@ final class HqLandscape {
 		Kind[] kinds = Kind.values();
 		for (int i = 0; i < spots.length; i++) {
 			int[] s = spots[i];
-			if (meadowAt(p, s[0], s[1])) {
+			if (meadowAt(p, s[0], s[1]) && !nearFarm(p, s[0], s[1])) {
 				tree(p, s[0], s[1], kinds[s[2]], 100 + i);
 				placed.add(new int[] {s[0], s[1]});
 			}
@@ -626,7 +844,7 @@ final class HqLandscape {
 			int jz = q[1] + (int) Math.round((rnd(q[1], q[0], seed + 1) - 0.5) * 3.0);
 			jx = Math.max(SITE[0] + 2, Math.min(SITE[3] - 2, jx));
 			jz = Math.max(SITE[2] + 2, Math.min(SITE[5] - 2, jz));
-			if (flatDistance(jx, jz) < 2.5 && edge(jx, jz) > 4) {
+			if ((flatDistance(p, jx, jz) < 2.5 && edge(jx, jz) > 4) || nearFarm(p, jx, jz)) {
 				continue;
 			}
 			boolean crowded = false;

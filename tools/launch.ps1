@@ -20,6 +20,8 @@
   tools\launch.ps1 -Backend codex                      # an all-Codex team on your Codex login (`codex login`)
   tools\launch.ps1 -ForemanArgs '--worker-engine','codex'   # mixed: Claude lead, Codex workers
   tools\launch.ps1 -Backend sim                        # scripted demo team, no API calls
+  tools\launch.ps1 -World survival                     # play survival: a real world with the HQ built into its terrain
+  tools\launch.ps1 -World survival -Seed 1234          # ... on a fixed seed
   tools\launch.ps1 -Showcase late                      # static showcase state (sim)
   tools\launch.ps1 -Dev -Showcase busy -Home C:\Projects\agentcraft\.agentcraft-home -Port 27878 -DevPort 7889
 #>
@@ -28,6 +30,11 @@ param(
     [ValidateSet('sim', 'claude', 'codex')][string]$Backend,
     [string[]]$Repo,
     [Alias('Profile')][string]$ForemanProfile,
+    # which world the game opens: the agents' studio (creative, flat meadow, default) or survival (a
+    # normal world in survival mode with the HQ built into its terrain, saved as "AgentCraft Survival")
+    [ValidateSet('studio', 'survival')][string]$World,
+    # seed of a world created on this launch (number or text); unset: fixed for the studio, random for survival
+    [string]$Seed,
     # -Showcase [busy|late]: a switch with an optional positional value
     [switch]$Showcase,
     [Parameter(Position = 0)][ValidateSet('busy', 'late')][string]$ShowcaseAt,
@@ -87,6 +94,8 @@ if ($showcaseOn) {
     if (-not $ShowcaseAt) { $ShowcaseAt = 'busy' }
 }
 if (-not $Backend) { if ($env:AGENTCRAFT_BACKEND) { $Backend = $env:AGENTCRAFT_BACKEND } else { $Backend = 'claude' } }
+if (-not $World) { if ($env:AGENTCRAFT_WORLD) { $World = $env:AGENTCRAFT_WORLD } else { $World = 'studio' } }
+if (@('studio', 'survival') -notcontains $World) { Fail "bad -World '$World' (studio or survival)" }
 if (-not $ForemanProfile) {
     if ($showcaseOn) { if ($ShowcaseAt -eq 'late') { $ForemanProfile = 'showcase-late' } else { $ForemanProfile = 'showcase' } }
     else { $ForemanProfile = $Backend }
@@ -339,9 +348,11 @@ if ($liveGame) {
         AGENTCRAFT_DEV_PORT = [string]$DevPort
         AGENTCRAFT_HOME     = $AgentHome
         AGENTCRAFT_PROFILE  = $ForemanProfile
+        AGENTCRAFT_WORLD    = $World
         AGENTCRAFT_MUTE     = $(if ($Dev) { '1' } else { '0' })
         AGENTCRAFT_FOCUS    = $(if ($Dev) { '0' } else { '1' })
     }
+    if ($Seed) { $gameEnv.AGENTCRAFT_WORLD_SEED = $Seed }
     # cmd.exe /s /c "<gradlew.bat> args": a .bat cannot be spawned directly; the arguments are fixed
     # (no user text), quoted per argument and passed verbatim
     $inner = Join-CmdArgs (@((Join-Path $L.Mod 'gradlew.bat')) + $gargs)
@@ -403,6 +414,10 @@ while ((Get-Date) -lt $deadline) {
             $w = ''
             if ($ws.world) { $w = "world '$($ws.world.name)'" }
             Write-Kv 'ready' ("{0}  {1} fps  in {2:N0} s" -f $w, $ws.fps, ((Get-Date) - $t0).TotalSeconds) 'Green'
+            $wantWorld = if ($World -eq 'survival') { 'AgentCraft Survival' } else { 'AgentCraft HQ' }
+            if ($ws.world -and $ws.world.name -ne $wantWorld) {
+                Write-Warn2 "the game is in world '$($ws.world.name)', not '$wantWorld' (-World $World): stop it (tools\stop.ps1 -Game) and launch again"
+            }
             $gameInfo.ready = $true
             break
         }

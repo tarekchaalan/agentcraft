@@ -16,12 +16,17 @@ import java.util.function.IntFunction;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.ExperienceOrb;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.level.block.AbstractFurnaceBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CopperBulbBlock;
+import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.CrossCollisionBlock;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.FarmlandBlock;
 import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.WallBlock;
@@ -65,11 +70,27 @@ final class Plan {
 	final int maxX;
 	final int maxY;
 	final int maxZ;
+	/** World = design + offset: the plan is drawn at its design origin and applied at the HQ site. */
+	final int ox;
+	final int oy;
+	final int oz;
 	private final int sx;
 	private final int sy;
 	private final int sz;
-	private final BlockState[] cells;
+	/** Design state per cell; null = left to the world (a column kept natural at the site's edge). */
+	private final @Nullable BlockState[] cells;
 	private final int[] top;
+	/** Columns left entirely to the world: nothing is planned or written there. */
+	private final BitSet keptColumns = new BitSet();
+	/** Kept columns whose tree (if any) is felled when the plan is applied: logs, leaves and vines above the world's ground go. */
+	private final BitSet canopyColumns = new BitSet();
+	/** The world's own ground before the build (design y of the top ground block per column), when sampled. */
+	private int @Nullable [] naturalTop;
+	private boolean @Nullable [] naturalWater;
+	private boolean @Nullable [] naturalClear;
+	/** The plan is for survival play (farms, a bedroom, lighting; the landscape levels ground for them). */
+	private boolean survival;
+	/** Bindings in design coordinates, translated when applied. */
 	private final Map<BlockPos, String> bindings = new LinkedHashMap<>();
 
 	/**
@@ -85,12 +106,24 @@ final class Plan {
 
 	/** @param ground desired state of an unset cell by y (the meadow profile); the ground top is {@code groundTop}. */
 	Plan(int minX, int minY, int minZ, int maxX, int maxY, int maxZ, int groundTop, IntFunction<BlockState> ground) {
+		this(minX, minY, minZ, maxX, maxY, maxZ, groundTop, ground, 0, 0, 0);
+	}
+
+	/**
+	 * A plan drawn in design coordinates (the box, {@code groundTop} and every {@code set} call) that
+	 * is applied to the world at {@code (ox, oy, oz)} + design: cell (x, y, z) of the plan is world
+	 * block (x + ox, y + oy, z + oz).
+	 */
+	Plan(int minX, int minY, int minZ, int maxX, int maxY, int maxZ, int groundTop, IntFunction<BlockState> ground, int ox, int oy, int oz) {
 		this.minX = minX;
 		this.minY = minY;
 		this.minZ = minZ;
 		this.maxX = maxX;
 		this.maxY = maxY;
 		this.maxZ = maxZ;
+		this.ox = ox;
+		this.oy = oy;
+		this.oz = oz;
 		this.sx = maxX - minX + 1;
 		this.sy = maxY - minY + 1;
 		this.sz = maxZ - minZ + 1;
@@ -111,8 +144,14 @@ final class Plan {
 		return cells.length;
 	}
 
-	BlockState[] cells() {
+	/** The design, one state per cell (null where the plan leaves the world alone). */
+	@Nullable BlockState[] cells() {
 		return cells;
+	}
+
+	/** The box this plan writes, in world coordinates ({@code minX, minY, minZ, maxX, maxY, maxZ}). */
+	int[] worldBox() {
+		return new int[] {minX + ox, minY + oy, minZ + oz, maxX + ox, maxY + oy, maxZ + oz};
 	}
 
 	boolean in(int x, int y, int z) {
@@ -127,18 +166,156 @@ final class Plan {
 		return ((y - minY) * sz + (z - minZ)) * sx + (x - minX);
 	}
 
+	private int column(int x, int z) {
+		return (z - minZ) * sx + (x - minX);
+	}
+
 	BlockState get(int x, int y, int z) {
-		return in(x, y, z) ? cells[index(x, y, z)] : Blocks.AIR.defaultBlockState();
+		if (!in(x, y, z)) {
+			return Blocks.AIR.defaultBlockState();
+		}
+		BlockState s = cells[index(x, y, z)];
+		return s == null ? Blocks.AIR.defaultBlockState() : s;
 	}
 
 	boolean isAir(int x, int y, int z) {
 		return get(x, y, z).isAir();
 	}
 
+	/** Writes a design cell; a kept column ({@link #keepColumn}) and anything outside the box are ignored. */
 	void set(int x, int y, int z, BlockState state) {
-		if (in(x, y, z)) {
+		if (in(x, y, z) && !keptColumns.get(column(x, z))) {
 			cells[index(x, y, z)] = state;
 		}
+	}
+
+	// ------------------------------------------------------------------ the world's own terrain
+
+	/**
+	 * Leaves column (x, z) entirely to the world: every cell becomes "no opinion" and later writes to
+	 * it are ignored. Used for the outermost columns of a site in a natural world, so the plan meets
+	 * the terrain exactly where the terrain is.
+	 */
+	void keepColumn(int x, int z) {
+		if (!inXZ(x, z)) {
+			return;
+		}
+		keptColumns.set(column(x, z));
+		for (int y = minY; y <= maxY; y++) {
+			cells[index(x, y, z)] = null;
+		}
+	}
+
+	boolean isKept(int x, int z) {
+		return inXZ(x, z) && keptColumns.get(column(x, z));
+	}
+
+	/**
+	 * The one write a kept column accepts: a single cell, for the hidden lights that keep mobs from
+	 * spawning around a survival site. Everything else in the column stays the world's.
+	 */
+	void setInKept(int x, int y, int z, BlockState state) {
+		if (in(x, y, z) && keptColumns.get(column(x, z))) {
+			cells[index(x, y, z)] = state;
+		}
+	}
+
+	/**
+	 * Marks a kept column for felling: when the plan is applied, every log, leaf, vine or mushroom
+	 * block above the world's own ground in it is removed (before the plan's own writes), the ground
+	 * and everything else stay the world's. Ignored for columns the plan writes (those are rebuilt
+	 * from the ground up anyway).
+	 */
+	void clearCanopy(int x, int z) {
+		if (inXZ(x, z) && keptColumns.get(column(x, z))) {
+			canopyColumns.set(column(x, z));
+		}
+	}
+
+	boolean canopyCleared(int x, int z) {
+		return inXZ(x, z) && canopyColumns.get(column(x, z));
+	}
+
+	/** What felling removes: the parts of a tree (or huge mushroom) above the ground. */
+	private static boolean canopy(BlockState s) {
+		return s.is(BlockTags.LOGS) || s.is(BlockTags.LEAVES) || s.is(Blocks.VINE) || s.is(Blocks.BEE_NEST) || s.is(Blocks.COCOA)
+			|| s.is(Blocks.MANGROVE_ROOTS) || s.is(Blocks.BROWN_MUSHROOM_BLOCK) || s.is(Blocks.RED_MUSHROOM_BLOCK) || s.is(Blocks.MUSHROOM_STEM);
+	}
+
+	/**
+	 * Fells the trees in the marked columns ({@link #clearCanopy}): world writes with shape updates
+	 * on (so leaves left standing outside the clearing learn they lost their trunk and decay) but
+	 * without drops. Returns the number of blocks removed.
+	 */
+	private int fell(ServerLevel level, BlockPos.MutableBlockPos m, List<String> sample) {
+		if (canopyColumns.isEmpty() || naturalTop == null) {
+			return 0;
+		}
+		int felled = 0;
+		BlockState air = Blocks.AIR.defaultBlockState();
+		for (int c = canopyColumns.nextSetBit(0); c >= 0; c = canopyColumns.nextSetBit(c + 1)) {
+			int x = minX + c % sx;
+			int z = minZ + c / sx;
+			for (int y = Math.max(minY, naturalTop[c] + 1); y <= maxY; y++) {
+				m.set(x + ox, y + oy, z + oz);
+				BlockState cur = level.getBlockState(m);
+				if (canopy(cur)) {
+					note(sample, m, cur, air);
+					level.setBlock(m, air, Block.UPDATE_ALL | Block.UPDATE_SUPPRESS_DROPS);
+					felled++;
+				}
+			}
+		}
+		return felled;
+	}
+
+	void setSurvival(boolean survival) {
+		this.survival = survival;
+	}
+
+	boolean survival() {
+		return survival;
+	}
+
+	/**
+	 * The world's ground as it was before the build, sampled per column in design coordinates:
+	 * {@code tops[column]} = design y of the highest ground block (or of the water surface where the
+	 * column is under water), {@code water[column]} = the column is under water,
+	 * {@code clear[column]} = the cell above the top is air or a plant (something a light block may
+	 * replace). All arrays are indexed like {@link #column}, i.e. {@code (z - minZ) * sizeX + (x - minX)}.
+	 */
+	void setNatural(int[] tops, boolean[] water, boolean[] clear) {
+		if (tops.length != sx * sz || water.length != sx * sz || clear.length != sx * sz) {
+			throw new IllegalArgumentException("natural terrain sample has " + tops.length + " columns, the plan " + (sx * sz));
+		}
+		this.naturalTop = tops;
+		this.naturalWater = water;
+		this.naturalClear = clear;
+	}
+
+	boolean hasNatural() {
+		return naturalTop != null;
+	}
+
+	/** Design y of the world's own ground top in column (x, z); the meadow default outside the box or without a sample. */
+	int naturalTop(int x, int z) {
+		return naturalTop != null && inXZ(x, z) ? naturalTop[column(x, z)] : StudioHqBuilder.GROUND;
+	}
+
+	boolean naturalWater(int x, int z) {
+		return naturalWater != null && inXZ(x, z) && naturalWater[column(x, z)];
+	}
+
+	boolean naturalClearAbove(int x, int z) {
+		return naturalClear != null && inXZ(x, z) && naturalClear[column(x, z)];
+	}
+
+	int sizeX() {
+		return sx;
+	}
+
+	int sizeZ() {
+		return sz;
 	}
 
 	void set(int x, int y, int z, Block block) {
@@ -177,9 +354,23 @@ final class Plan {
 		}
 	}
 
-	/** Binding for the station block entity at (x, y, z), applied after the blocks. */
+	/** Binding for the station block entity at design cell (x, y, z), applied after the blocks. */
 	void bind(int x, int y, int z, String binding) {
 		bindings.put(new BlockPos(x, y, z), binding);
+	}
+
+	/** The highest non-air design cell of column (x, z), or {@code minY - 1} when the column is all air or kept. */
+	int highest(int x, int z) {
+		if (!inXZ(x, z) || keptColumns.get(column(x, z))) {
+			return minY - 1;
+		}
+		for (int y = maxY; y >= minY; y--) {
+			BlockState s = cells[index(x, y, z)];
+			if (s != null && !s.isAir()) {
+				return y;
+			}
+		}
+		return minY - 1;
 	}
 
 	/**
@@ -193,11 +384,17 @@ final class Plan {
 			for (int z = minZ; z <= maxZ; z++) {
 				for (int x = minX; x <= maxX; x++) {
 					BlockState s = cells[index(x, y, z)];
+					if (s == null) {
+						continue;
+					}
 					boolean isGrass = s.is(Blocks.GRASS_BLOCK);
 					if (!isGrass && !s.is(Blocks.DIRT)) {
 						continue;
 					}
 					BlockState above = cells[index(x, y + 1, z)];
+					if (above == null) {
+						continue;
+					}
 					boolean lives = !above.getFluidState().isFull()
 						&& LightEngine.getLightDampeningInto(grass, above, Direction.UP, above.getLightDampening()) < 15;
 					// grass that cannot live decays to dirt; dirt that grass could live on is eventually
@@ -220,11 +417,19 @@ final class Plan {
 			|| b instanceof PanelBlock;
 	}
 
-	/** Properties the Foreman drives (or that a redstone-less bulb toggles): never part of the design. */
+	/**
+	 * Properties the Foreman drives (or that a redstone-less bulb toggles), and the ones a player
+	 * toggles by using the block (a door swung open, a furnace burning): never part of the design.
+	 */
 	private static boolean drivenProp(Block b, Property<?> p) {
 		return b instanceof StatusLampBlock && p == StatusLampBlock.STATUS || b instanceof DecisionPodiumBlock && p == DecisionPodiumBlock.OPEN
 			|| b instanceof MergeStationBlock && p == MergeStationBlock.ACTIVE || b instanceof MonitorBlock && p == MonitorBlock.LIT
-			|| b instanceof CopperBulbBlock && (p == CopperBulbBlock.LIT || p == CopperBulbBlock.POWERED);
+			|| b instanceof CopperBulbBlock && (p == CopperBulbBlock.LIT || p == CopperBulbBlock.POWERED)
+			|| b instanceof DoorBlock && (p == DoorBlock.OPEN || p == DoorBlock.POWERED)
+			|| b instanceof FenceGateBlock && (p == FenceGateBlock.OPEN || p == FenceGateBlock.POWERED)
+			|| b instanceof AbstractFurnaceBlock && p == AbstractFurnaceBlock.LIT
+			|| b instanceof CropBlock && p == CropBlock.AGE
+			|| b instanceof FarmlandBlock && p == FarmlandBlock.MOISTURE;
 	}
 
 	/** Same block and same design: ignores connection properties and Foreman-driven properties. */
@@ -281,6 +486,22 @@ final class Plan {
 		if (b instanceof CopperBulbBlock) {
 			return desired.setValue(CopperBulbBlock.LIT, current.getValue(CopperBulbBlock.LIT));
 		}
+		if (b instanceof DoorBlock) {
+			return desired.setValue(DoorBlock.OPEN, current.getValue(DoorBlock.OPEN)).setValue(DoorBlock.POWERED, current.getValue(DoorBlock.POWERED));
+		}
+		if (b instanceof AbstractFurnaceBlock) {
+			return desired.setValue(AbstractFurnaceBlock.LIT, current.getValue(AbstractFurnaceBlock.LIT));
+		}
+		if (b instanceof FenceGateBlock) {
+			return desired.setValue(FenceGateBlock.OPEN, current.getValue(FenceGateBlock.OPEN)).setValue(FenceGateBlock.POWERED,
+				current.getValue(FenceGateBlock.POWERED));
+		}
+		if (b instanceof CropBlock) {
+			return desired.setValue(CropBlock.AGE, current.getValue(CropBlock.AGE));
+		}
+		if (b instanceof FarmlandBlock) {
+			return desired.setValue(FarmlandBlock.MOISTURE, current.getValue(FarmlandBlock.MOISTURE));
+		}
 		return desired;
 	}
 
@@ -302,19 +523,29 @@ final class Plan {
 		List<BlockPos> deferred = new ArrayList<>();
 		boolean guard = previous != null && previous.length == cells.length && !force;
 		BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
-		for (int cx = minX >> 4; cx <= maxX >> 4; cx++) {
-			for (int cz = minZ >> 4; cz <= maxZ >> 4; cz++) {
+		// the world's trees in the farm clearing come down first, so a light written above a felled trunk's ground stays
+		changed += fell(level, m, sample);
+		// chunks and block positions are world coordinates; cells are indexed in design coordinates
+		int wMinX = minX + ox;
+		int wMaxX = maxX + ox;
+		int wMinZ = minZ + oz;
+		int wMaxZ = maxZ + oz;
+		for (int cx = wMinX >> 4; cx <= wMaxX >> 4; cx++) {
+			for (int cz = wMinZ >> 4; cz <= wMaxZ >> 4; cz++) {
 				LevelChunk chunk = level.getChunk(cx, cz);
-				int x0 = Math.max(minX, cx << 4);
-				int x1 = Math.min(maxX, (cx << 4) + 15);
-				int z0 = Math.max(minZ, cz << 4);
-				int z1 = Math.min(maxZ, (cz << 4) + 15);
+				int x0 = Math.max(wMinX, cx << 4);
+				int x1 = Math.min(wMaxX, (cx << 4) + 15);
+				int z0 = Math.max(wMinZ, cz << 4);
+				int z1 = Math.min(wMaxZ, (cz << 4) + 15);
 				for (int y = minY; y <= maxY; y++) {
-					for (int z = z0; z <= z1; z++) {
-						for (int x = x0; x <= x1; x++) {
-							int i = index(x, y, z);
+					for (int wz = z0; wz <= z1; wz++) {
+						for (int wx = x0; wx <= x1; wx++) {
+							int i = index(wx - ox, y, wz - oz);
 							BlockState want = cells[i];
-							m.set(x, y, z);
+							if (want == null) {
+								continue; // the world's own: never compared, never written
+							}
+							m.set(wx, y + oy, wz);
 							BlockState cur = chunk.getBlockState(m);
 							if (cur != want && !sameDesign(cur, want)) {
 								if (guard && !sameDesign(cur, previous[i])) {
@@ -358,7 +589,7 @@ final class Plan {
 		int connected = 0;
 		for (BlockPos p : deferred) {
 			BlockState cur = level.getBlockState(p);
-			BlockState want = Block.updateFromNeighbourShapes(keepDriven(cur, cells[index(p.getX(), p.getY(), p.getZ())]), level, p);
+			BlockState want = Block.updateFromNeighbourShapes(keepDriven(cur, cells[index(p.getX() - ox, p.getY() - oy, p.getZ() - oz)]), level, p);
 			if (cur != want) {
 				note(sample, p, cur, want);
 				level.setBlock(p, want, FLAGS);
@@ -367,10 +598,11 @@ final class Plan {
 		}
 		int bound = 0;
 		for (var e : bindings.entrySet()) {
-			BlockPos p = e.getKey();
-			if (in(p.getX(), p.getY(), p.getZ()) && keptCells.get(index(p.getX(), p.getY(), p.getZ()))) {
+			BlockPos d = e.getKey();
+			if (in(d.getX(), d.getY(), d.getZ()) && keptCells.get(index(d.getX(), d.getY(), d.getZ()))) {
 				continue;
 			}
+			BlockPos p = d.offset(ox, oy, oz);
 			if (level.getBlockEntity(p) instanceof StationBlockEntity be) {
 				if (!be.binding().equals(e.getValue())) {
 					bound++;
@@ -394,7 +626,7 @@ final class Plan {
 	 * leave items behind, e.g. carpets that lost their floor). Players, agents and other mobs stay.
 	 */
 	private int clearDrops(ServerLevel level) {
-		AABB box = new AABB(minX, minY, minZ, maxX + 1, maxY + 1, maxZ + 1);
+		AABB box = new AABB(minX + ox, minY + oy, minZ + oz, maxX + ox + 1, maxY + oy + 1, maxZ + oz + 1);
 		int n = 0;
 		for (ItemEntity e : level.getEntitiesOfClass(ItemEntity.class, box)) {
 			e.discard();

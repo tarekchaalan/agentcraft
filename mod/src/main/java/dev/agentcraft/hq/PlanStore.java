@@ -15,6 +15,7 @@ import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.LevelResource;
 import org.jspecify.annotations.Nullable;
@@ -72,11 +73,14 @@ final class PlanStore {
 		ListTag palette = new ListTag();
 		int[] idx = new int[cells.length];
 		for (int i = 0; i < cells.length; i++) {
-			Integer id = ids.get(cells[i]);
+			// a cell the plan leaves to the world (the natural edge of a site) is remembered as air: the
+			// next build skips it again before ever comparing it
+			BlockState s = cells[i] == null ? Blocks.AIR.defaultBlockState() : cells[i];
+			Integer id = ids.get(s);
 			if (id == null) {
 				id = ids.size();
-				ids.put(cells[i], id);
-				palette.add(NbtUtils.writeBlockState(cells[i]));
+				ids.put(s, id);
+				palette.add(NbtUtils.writeBlockState(s));
 			}
 			idx[i] = id;
 		}

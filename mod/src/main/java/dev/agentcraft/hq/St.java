@@ -86,6 +86,15 @@ final class St {
 		return Blocks.LIGHT.defaultBlockState().setValue(LightBlock.LEVEL, level);
 	}
 
+	/**
+	 * A water source that never freezes: a waterlogged light block. It looks and behaves as water
+	 * (hydrates farmland, flows nowhere) but is no {@code LiquidBlock} and is lit, and
+	 * {@code Biome.shouldFreeze} wants both for ice.
+	 */
+	static BlockState unfrozenWater(int level) {
+		return light(level).setValue(LightBlock.WATERLOGGED, true);
+	}
+
 	static BlockState candle(Block b, int n, boolean lit) {
 		return b.defaultBlockState().setValue(CandleBlock.CANDLES, n).setValue(CandleBlock.LIT, lit);
 	}

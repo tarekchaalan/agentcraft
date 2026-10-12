@@ -59,19 +59,28 @@ GRADLE_USER_HOME=C:/Projects/agentcraft/.gradle-home ./gradlew --stop       # st
    inactivity FPS limit set to "minimized" only. Delete `mod/run/options.txt` to reset it.
 2. Program args: `--username <you> --width 1920 --height 1080`, where `<you>` is `AGENTCRAFT_PLAYER`
    or else your OS user name (letters, digits and `_`, at most 16 characters).
-3. **AutoWorld** (client) runs the first time the title screen appears. It loads the world folder
-   `AgentCraft HQ` if it exists, and otherwise creates it: creative, peaceful, commands allowed, no
-   structures, no bonus chest, superflat plains meadow (bedrock / 124 stone / 3 dirt / grass), so
-   **the grass top is y=64 and you stand at y=65**. World spawn is 0 65 0.
-4. **HqWorld** (server side, HQ world only) re-applies the game rules on every start: no time or
-   weather cycle, keep inventory, no fire spread, no mob spawning of any kind, no mob griefing, no vine
-   spread, no snow build-up, respawn radius 0, no locator bar, quiet advancement and command output,
-   and max_block_modifications 1,000,000 so large /fill commands work for the HQ builder. On first
-   creation it also sets time 12000 (golden hour), clear weather and the world spawn. It writes a
-   marker file `agentcraft-world.json` in the world folder. Players who join in spectator or survival
-   are put back into creative.
+3. **AutoWorld** (client) runs the first time the title screen appears. It loads the world of the
+   selected profile (`AGENTCRAFT_WORLD`, see `world.WorldProfile`) if its folder exists, and
+   otherwise creates it:
+   - `studio` (default), folder `AgentCraft HQ`: creative, peaceful, commands allowed, no
+     structures, no bonus chest, superflat plains meadow (bedrock / 124 stone / 3 dirt / grass), so
+     **the grass top is y=64 and you stand at y=65**. World spawn is 0 65 0. Fixed seed.
+   - `survival`, folder `AgentCraft Survival`: a normal world with structures, survival mode, normal
+     difficulty, commands allowed (so `/agentcraft hq` and the dev tools work). Random seed unless
+     `AGENTCRAFT_WORLD_SEED` is set (a number, or text hashed like the world-creation screen does).
+4. **HqWorld** (server side, AgentCraft worlds only) re-applies the game rules on every start.
+   Studio: no time or weather cycle, keep inventory, no fire spread, no mob spawning of any kind, no
+   mob griefing, no vine spread, no snow build-up, respawn radius 0, no locator bar, quiet advancement
+   and command output, and max_block_modifications 1,000,000 so large /fill commands work for the HQ
+   builder; players who join in spectator or survival are put back into creative. Survival: **vanilla**.
+   Every rule the studio touches is reset to its vanilla default on each start (read from a fresh
+   default rule set, so an older survival world loses the studio rules too), and players keep their
+   game mode. On first creation the studio gets clear weather, time 12000 (golden hour) and its world
+   spawn; a survival world starts like any new vanilla world. Both write the marker file
+   `agentcraft-world.json` in the world folder (`profile`, and in natural worlds the HQ `site`, see
+   "The HQ in a natural world" in FEATURES.md).
 
-Delete `mod/run/saves/AgentCraft HQ` to start over with a fresh world.
+Delete `mod/run/saves/AgentCraft HQ` (or `AgentCraft Survival`) to start over with a fresh world.
 
 ### Environment switches (env var, or `-Dagentcraft.xxx=` system property)
 
@@ -81,7 +90,9 @@ Delete `mod/run/saves/AgentCraft HQ` to start over with a fresh world.
 | `AGENTCRAFT_DEV` | dev run: 1, jar: 0 | `0` disables the DevBridge, `1` enables it |
 | `AGENTCRAFT_MUTE` | dev run: 1, jar: 0 | `1` forces master and music volume to 0 at startup. **Set `0` for real use** (for example in launch.ps1) to keep your own volume |
 | `AGENTCRAFT_FOCUS` | dev run: 0, jar: 1 | `0`: the window is shown **without activating it**, so it never steals focus. `1`: normal "come to front" |
-| `AGENTCRAFT_AUTOWORLD` | dev run: 1, jar: 0 | `1`: create/load the "AgentCraft HQ" world on startup; `0`: stay on the title screen |
+| `AGENTCRAFT_AUTOWORLD` | dev run: 1, jar: 0 | `1`: create/load the AgentCraft world on startup; `0`: stay on the title screen |
+| `AGENTCRAFT_WORLD` | `studio` | `studio` = the agents' creative meadow ("AgentCraft HQ"); `survival` = a normal world in survival mode ("AgentCraft Survival"), the HQ built into its terrain |
+| `AGENTCRAFT_WORLD_SEED` | studio: fixed; survival: random | seed of a world created on this start (number, or text hashed like the world-creation screen) |
 | `AGENTCRAFT_SHOTS_DIR` | `<repo>/artifacts/shots` | Where `dev.screenshot` writes |
 | `AGENTCRAFT_DEV_ALLOW_ORIGIN` | 0 | `1` lets browser pages (which send an Origin header) connect. They are refused by default |
 | `AGENTCRAFT_DEV_TEST` | 0 | `1` registers test-only commands (`dev.test.stall`, which blocks the render thread to simulate a hung game; `dev.test.foremanMessage`). Never set it for real use |
@@ -379,9 +390,11 @@ looking away (the verifier measured 1400-1500 before this change).
 `layout.Anchors` holds the published layout (an immutable snapshot, readable from any thread) and
 saves it as `agentcraft-anchors.json` in the world folder; it is loaded again whenever the HQ world
 starts. `/agentcraft hq [builder]` runs an `hq.HqBuilder`, publishes its anchors and moves the world
-spawn to `spawn`. Because it rewrites terrain and moves the spawn, it only builds in the "AgentCraft HQ"
-world (opt in elsewhere with `-Dagentcraft.hq.anyworld=1` / `AGENTCRAFT_HQ_ANYWORLD=1`) and never in a
-Hardcore world; a Hardcore world is never treated as the HQ world, and the DevBridge refuses every
+spawn to `spawn`. Because it rewrites terrain and moves the spawn, it only builds in the AgentCraft
+worlds ("AgentCraft HQ" at the origin; "AgentCraft Survival" on the world's HQ site, see FEATURES.md
+"The HQ in a natural world"; opt in elsewhere with `-Dagentcraft.hq.anyworld=1` /
+`AGENTCRAFT_HQ_ANYWORLD=1`, which builds like survival) and never in a
+Hardcore world; a Hardcore world is never treated as an AgentCraft world, and the DevBridge refuses every
 request but `dev.help` while one is loaded. The Phase 2 builder `test` (`hq.TestRoomBuilder`) is a temporary 25x25 walled
 room: a desk island with six monitors (north), library shelves and the task wall (west), terminals
 and merge stations (east), a meeting table and the goal atrium (centre), the podium with user spots,

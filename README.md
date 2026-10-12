@@ -208,6 +208,30 @@ The first launch installs npm dependencies and lets Gradle download Minecraft an
 takes a few minutes. After that, a launch reaches the studio in under a minute. The HQ builds itself
 the first time; in an older world, rebuild it with `/agentcraft hq`.
 
+**Two worlds.** By default you get the studio world: creative, peaceful, a flat meadow with nothing
+in it but the HQ and its grounds (a garden wall and lychgate at the end of the path, terraces, a
+glazed conservatory, pond, cottage garden, a ring path round the back), time stopped at golden hour.
+It is the agents' world, made for watching the team.
+If you would rather play Minecraft while they code, launch with `-World survival`
+(`--world survival` on macOS and Linux):
+
+```powershell
+tools\launch.ps1 -World survival -Repo C:\path\to\your\repo
+```
+
+That opens (or creates) a second save, **AgentCraft Survival**: a normal, randomly generated world in
+survival mode, with day and night, weather, mobs and structures. The same studio is built on the
+flattest ground near the spawn and blended into the terrain, and it comes survival-ready: doors on the
+entrance and two back doors to the farms, your own bedroom off the hall's south-east corner with a
+workbench corner beside it, a fenced crop farm (wheat, carrots, potatoes, with a grass walk round the
+fields) and four animal pens with two cows, pigs, sheep and chickens behind the hall (carpets on the
+fence posts let you climb in and out, the animals cannot), no trees near the farms, and hidden lighting
+across the site and its surroundings so nothing hostile spawns near the base. Everything else is vanilla
+Minecraft: vanilla game rules, day and night, weather, mobs. None of it touches the agents' stations.
+Both worlds live side by side; `-World studio` (the default) takes you back. Add `-Seed 1234` to
+create the survival world on a fixed seed. A world built before a feature existed gets it with
+`/agentcraft hq`, which applies the plan as a diff and keeps what you changed yourself.
+
 > **Personal use with Claude Code.** If you already use Claude Code, `tools\launch.ps1 -UseClaudeLogin`
 > runs the agents on your own `claude` CLI login instead of an API key. Anthropic does not allow
 > third party tools to offer claude.ai login to their users, so this is off by default and meant for
@@ -293,8 +317,8 @@ flowchart LR
 
 <br>
 
-- **Team:** a lead (Opus by default) that plans and reviews, and up to three workers at once (Sonnet
-  by default). Pick the team with `--workers`.
+- **Team:** a lead (Fable 5.1 by default) that plans and reviews, and up to three workers at once
+  (Opus 5.5 by default). Pick the team with `--workers`.
 - **Task graph:** tasks only start when the tasks they depend on are done, and move through todo,
   doing, review and done, with blocked on the side.
 - **CI loop:** your tests run after each task. A failure goes back to the worker once, then to review

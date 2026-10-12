@@ -22,6 +22,7 @@ const runFile = (kind, profile) => path.join(runDir, `unix-${kind}-${profile}.js
 function usage(code = 0) {
   console.log(`AgentCraft launcher (macOS, Linux)
   node tools/unix.mjs launch [--backend sim|claude|codex] [--repo PATH] [--use-claude-login]
+                            [--world studio|survival] [--seed SEED]
                             [--home PATH] [--profile NAME] [--port N] [--dev-port N]
                             [--dev] [--showcase busy|late] [--reset]
                             [--no-game] [--no-foreman] [--no-wait]
@@ -29,14 +30,16 @@ function usage(code = 0) {
                             [--foreman-arg VALUE] (repeatable)
   node tools/unix.mjs stop [--game] [--foreman] [--profile NAME] [--stop-daemon]
 
-Default: Claude backend, ~/.agentcraft, ports 7878/7879. --dev mutes the game,
-keeps it from taking focus, and disables desktop notifications.`);
+Default: Claude backend, ~/.agentcraft, ports 7878/7879, the studio world. --dev mutes
+the game, keeps it from taking focus, and disables desktop notifications.
+--world survival opens (or creates) the "AgentCraft Survival" world instead: a normal
+world in survival mode with the HQ built into its terrain; --seed fixes its seed.`);
   process.exit(code);
 }
 
 function options(argv) {
   const out = { action: argv.shift(), repo: [], foremanArgs: [] };
-  const values = new Set(['backend', 'repo', 'home', 'profile', 'port', 'dev-port', 'showcase', 'summary-json', 'foreman-arg']);
+  const values = new Set(['backend', 'repo', 'home', 'profile', 'port', 'dev-port', 'showcase', 'summary-json', 'foreman-arg', 'world', 'seed']);
   const switches = new Set(['use-claude-login', 'dev', 'reset', 'no-game', 'no-foreman', 'no-wait', 'game', 'foreman', 'stop-daemon']);
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i].replace(/^--/, '');
@@ -58,6 +61,8 @@ function options(argv) {
     out.profile ??= out.showcase === 'late' ? 'showcase-late' : 'showcase';
   }
   if (!['sim', 'claude', 'codex'].includes(out.backend)) throw new Error('backend must be sim, claude or codex');
+  out.world ??= process.env.AGENTCRAFT_WORLD || 'studio';
+  if (!['studio', 'survival'].includes(out.world)) throw new Error('world must be studio or survival');
   out.profile ??= out.backend;
   if (!/^[\w-]+$/.test(out.profile)) throw new Error('profile must contain only letters, digits, _ or -');
   out.home = path.resolve(out.home ?? process.env.AGENTCRAFT_HOME ?? path.join(os.homedir(), '.agentcraft'));
@@ -237,9 +242,10 @@ async function launch(opt, summary) {
   const env = {
     JAVA_HOME: javaHome(), GRADLE_USER_HOME: gradleHome,
     AGENTCRAFT_PORT: String(fmPort), AGENTCRAFT_DEV_PORT: String(opt['dev-port']),
-    AGENTCRAFT_HOME: opt.home, AGENTCRAFT_PROFILE: opt.profile,
+    AGENTCRAFT_HOME: opt.home, AGENTCRAFT_PROFILE: opt.profile, AGENTCRAFT_WORLD: opt.world,
     AGENTCRAFT_MUTE: opt.dev ? '1' : '0', AGENTCRAFT_FOCUS: opt.dev ? '0' : '1',
   };
+  if (opt.seed) env.AGENTCRAFT_WORLD_SEED = opt.seed;
   game = { ...start('/bin/sh', [path.join(root, 'mod', 'gradlew'), 'runClient', '--console=plain'], path.join(root, 'mod'), path.join(logDir, 'unix-game.log'), env), devPort: opt['dev-port'], foremanPort: fmPort };
   saveJson(gameFile, game);
   summary.game.started = true;

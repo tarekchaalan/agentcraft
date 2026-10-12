@@ -148,8 +148,92 @@ then builds yours; `/agentcraft hq test` still builds the test room.
 world builds it automatically on first start (`AGENTCRAFT_HQ_AUTOBUILD=0` turns that off). A long
 timber-framed studio hall (x -24..24, z -10..6, floor blocks y=65, **agents stand at y=66**) with an
 octagonal Goal Atrium in front under a ribbed copper dome with a glazed lantern (centre 0,15;
-entrance and spawn at z=22, gabled portico, path south to a lychgate at z=48), terraces, pond,
-cottage garden, all in a meadow hollow ringed by low wooded hills (closed horizon).
+entrance and spawn at z=22, gabled portico, path south to a lychgate at z=48 set in a low mud-brick
+garden wall with piers and lanterns, x -26..26, a dark oak gate between fence panels under the
+lychgate roof), terraces, pond, cottage garden, a ring path round the back of the hall whose ends
+turn in along the terrace fronts to the terrace steps (lantern posts on its corners), and a glazed
+**conservatory** on the west terrace (x -24..-14, z 7..12: tile floor, glass between the posts,
+copper shed roof, potting bench, azaleas, a bench; doors from the hall at (-16, 6) and onto the
+meadow at (-17, 12) where the terrace path starts; no station or anchor), all in a meadow hollow
+ringed by low wooded hills (closed horizon). All coordinates
+in this section are **design coordinates**: the studio world builds at the origin, so they are world
+coordinates there; a natural world builds the same plan at its HQ site (below), offset.
+
+### The HQ in a natural world (the survival profile)
+
+The survival world (`world.WorldProfile.SURVIVAL`, "AgentCraft Survival", see DEV.md "Build and
+run") is a normal world. The builder places the same studio into it:
+
+- **Site.** The first build picks the site (`hq.HqTerrain.findSite`): candidate origins on an 8-block
+  lattice within 64 blocks of the world spawn (128 if nothing near is good), each judged on the ground
+  heights of the lattice columns inside the core footprint (x -32..32, z -16..48: hall, atrium, court,
+  pond, garden). Median = the ground level; mean deviation, range and the share of water columns say
+  how much terrain a build would move or fill. Good = water <= 6%, range <= 20, mean deviation
+  <= 3.5; the best good candidate wins (closer to spawn breaks ties), else the least bad one with a
+  warning. The site (`HqSite`: world x, ground y, z of the design origin) is kept in the world's
+  `agentcraft-world.json`, so every rebuild lands on the same ground. The plan is drawn in design
+  coordinates and translated on apply (`Plan` offsets, `Anchors.Builder.offset`), and the stored plan's
+  box is in world coordinates.
+- **Ground.** Before planning, the world's ground under every column of the site is read
+  (`HqTerrain.sample`: the highest block that is not air, plant, log, leaves, snow layer or fluid;
+  under water, the water surface). `HqLandscape.ground` then writes every column anew (stone, three
+  dirt, grass, air) at a height between the world's and the design's: the outermost 2 columns of
+  the box are left to the world entirely (`Plan.keepColumn`: never planned, never written), the next
+  16 blend from the world's height to the design's, the level areas (`FLAT`) are always at the design
+  height since what stands on them is at fixed heights, and ground next to kept water never dips
+  below its surface. The natural box reaches 16 below the meadow (`NATURAL_SITE`), so a dip under the
+  site is filled, not roofed over. Natural trees inside the box are replaced by the plan's; a tree
+  straddling the kept band loses its inner half.
+- **Survival extras** (`Options.survival`, also used by `AGENTCRAFT_HQ_ANYWORLD` builds):
+  - the entrance (z=24) gets two dark oak doors on a timber mullion with a glazed transom (one block
+    outside the agents' bounds, so no agent path crosses them);
+  - two **back doors** in the north wall: at x 18 (the free cell between the last desk cabinet and
+    the terminals, straight across from the animal farm's east gate) and in the middle under the big
+    north window (the window seat's centre cell goes, leaving a bench either side), each a half step
+    down through the hedge onto a path to the ring path;
+  - the hall's south-east bays (x 18..23, z=5, by the merge station) become the workbench corner:
+    crafting table, a double chest, furnace, smoker;
+  - the **bedroom**: a timber lean-to on the east terrace against the hall's south wall (x 14..24,
+    z 7..12) under the eaves, the conservatory's counterpart (both are `leanTo`), with a door from the
+    hall at (16, 6) and one onto the meadow at (17, 12) where the terrace path starts; bed, chest,
+    bookshelves, a rug, a reading lamp. No station or anchor; the agents' routes never reach it (the
+    hall wall was already a wall to them, and closed doors are blocks);
+  - the **farms**, behind the hall north of the ring path, on ground the landscape levels for them
+    (one level rectangle, `HqLandscape.CROP_FARM` to `ANIMAL_FARM` including the three columns
+    between them, joins the level areas in a survival plan; as two rectangles the gap blended a
+    block up):
+    - the **crop farm** (x -24..-2, z -31..-17): a one-block grass walk inside the fence round
+      19 x 11 of wheat, carrots and potatoes planted mature; two water channels of waterlogged light
+      blocks so they never freeze in a cold biome (`St.unfrozenWater`: not a `LiquidBlock` and lit,
+      `Biome.shouldFreeze` needs both); a spruce fence with lanterns and carpets on its corner and
+      middle posts; a gate at x -13 onto the ring path with a composter and hay beside it. The block
+      above the whole interior is cleared, so no upper half of the meadow's tall grass floats over
+      the crops;
+    - the **animal farm** (x 2..24, z -31..-17): four 10 x 6 pens in a fence cross, each with its
+      own gate, cows and pigs at the back, sheep and chickens at the front; a white carpet on each of
+      the nine posts where fence lines meet (a player can jump onto a carpet on a fence, animals
+      cannot: a way in and out of every pen without the gate). Nothing solid and nothing two blocks
+      tall stands inside a pen (an animal on a block, or a chicken fluttering up a tall plant, clears
+      the fence): the meadow's tall grass there becomes short grass. `stockPens` puts two of each in
+      after the blocks are applied, only what a pen is short of, so a rebuild never adds to a bred
+      herd;
+    - fences, gates and the composter stand on the meadow's grass top (`FLOOR`, one below the hall's
+      `FEET`). No tree within `HqLandscape.FARM_CLEARANCE` (6) of a farm: the plan's spot and ring
+      trees skip that zone, and the world's own trees in the kept columns there (`farmClearing` →
+      `Plan.clearCanopy`) are felled when the plan is applied (logs, leaves, vines above the ground;
+      no drops; the ground stays);
+  - **lighting**: `HqLandscape.spawnProofing` puts an invisible light block (level 10) every 6 blocks
+    above everything open to the sky, roofs included, plus one at ground level under canopies, so
+    block light never reaches 0 anywhere on the site. In a survival plan the box grows by
+    `LIGHT_MARGIN` (18) on every side and those columns, like the kept edge band, get the same
+    lattice one block above the world's own ground (only where that cell is air or a plant): the one
+    thing written outside the site, so nothing spawns within ~60 blocks of the hall either.
+
+  A rebuild ignores door and fence-gate `open`/`powered`, furnace `lit`, crop `age` and farmland
+  `moisture` (player-driven, like Foreman-driven properties), and chest contents live in the block
+  entity, which an unchanged cell never touches.
+- The studio world is unchanged by all this: no offset, the flat meadow, no extras, so an existing
+  studio rebuild still writes 0 cells.
 
 | zone | where | stations / anchors |
 |---|---|---|

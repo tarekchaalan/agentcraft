@@ -12,18 +12,39 @@ import dev.agentcraft.block.PanelBlock;
 import dev.agentcraft.block.StatusLampBlock;
 import dev.agentcraft.layout.AnchorNames;
 import dev.agentcraft.layout.Anchors;
+import dev.agentcraft.world.HqSite;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EntityTypeIds;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.DyeColor;
+import net.minecraft.world.level.block.AbstractFurnaceBlock;
+import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.CopperBulbBlock;
+import net.minecraft.world.level.block.CropBlock;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.FarmlandBlock;
+import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BedPart;
 import net.minecraft.world.level.block.state.properties.BellAttachType;
+import net.minecraft.world.level.block.state.properties.ChestType;
+import net.minecraft.world.level.block.state.properties.DoorHingeSide;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -74,6 +95,17 @@ public final class StudioHqBuilder implements HqBuilder {
 	static final int SPRING = 77;
 	/** Site box: rebuilt completely, never anything outside it. */
 	static final int[] SITE = {-46, 60, -36, 46, 100, 54};
+	/**
+	 * The site box in a natural world: the same footprint, reaching deeper, so a valley under the
+	 * meadow is filled rather than roofed over (the finder avoids ground more than ~10 below, and the
+	 * box takes 16).
+	 */
+	static final int[] NATURAL_SITE = {SITE[0], GROUND - 16, SITE[2], SITE[3], SITE[4], SITE[5]};
+	/**
+	 * Survival: the plan box grows by this much on every side, for the spawn-proof light lattice
+	 * only ({@code HqLandscape.spawnProofing}); those columns are otherwise left to the world.
+	 */
+	static final int LIGHT_MARGIN = 18;
 
 	/** Desk bay centres (x), west to east. */
 	static final int[] DESK_X = {-15, -11, -7, 7, 11, 15};
@@ -159,8 +191,27 @@ public final class StudioHqBuilder implements HqBuilder {
 	@Override
 	public @Nullable String build(ServerLevel level, Anchors.Builder a, Options options) {
 		long t0 = System.nanoTime();
-		Plan p = new Plan(SITE[0], SITE[1], SITE[2], SITE[3], SITE[4], SITE[5], GROUND, y -> y > GROUND ? AIR
-			: y == GROUND ? Blocks.GRASS_BLOCK.defaultBlockState() : y >= GROUND - 3 ? Blocks.DIRT.defaultBlockState() : Blocks.STONE.defaultBlockState());
+		// the plan is drawn at the design origin (ground y=64) and placed at the world's HQ site:
+		// the origin itself in the studio meadow, the chosen flat ground near the spawn in a natural world
+		HqSite site = options.site();
+		boolean natural = site != null;
+		int ox = natural ? site.x() : 0;
+		int oy = natural ? site.y() - GROUND : 0;
+		int oz = natural ? site.z() : 0;
+		int[] box = natural ? NATURAL_SITE : SITE;
+		if (options.survival()) {
+			box = new int[] {box[0] - LIGHT_MARGIN, box[1], box[2] - LIGHT_MARGIN, box[3] + LIGHT_MARGIN, box[4], box[5] + LIGHT_MARGIN};
+		}
+		Plan p = new Plan(box[0], box[1], box[2], box[3], box[4], box[5], GROUND, y -> y > GROUND ? AIR
+			: y == GROUND ? Blocks.GRASS_BLOCK.defaultBlockState() : y >= GROUND - 3 ? Blocks.DIRT.defaultBlockState() : Blocks.STONE.defaultBlockState(),
+			ox, oy, oz);
+		p.setSurvival(options.survival());
+		a.offset(ox, oy, oz);
+		long tSample0 = System.nanoTime();
+		if (natural) {
+			HqTerrain.sample(level, p);
+		}
+		long tSample = System.nanoTime() - tSample0;
 		long tPlan0 = System.nanoTime();
 		HqLandscape.ground(p);
 		hallShell(p);
@@ -176,17 +227,31 @@ public final class StudioHqBuilder implements HqBuilder {
 		atrium(p, a);
 		hallLighting(p);
 		HqLandscape.exterior(p);
+		conservatory(p);
+		if (options.survival()) {
+			entranceDoors(p);
+			backDoor(p);
+			survivalCorner(p);
+			bedroom(p);
+			cropFarm(p);
+			animalFarm(p);
+			HqLandscape.farmClearing(p);
+			HqLandscape.spawnProofing(p);
+		}
 		cameras(a);
 		p.settleGrass();
 		long tPlan = System.nanoTime() - tPlan0;
-		BlockState[] previous = PlanStore.load(level.getServer(), ID, SITE, p.size());
+		int[] worldBox = p.worldBox();
+		BlockState[] previous = PlanStore.load(level.getServer(), ID, worldBox, p.size());
 		Plan.Stats st = p.apply(level, previous, options.force());
-		PlanStore.save(level.getServer(), ID, SITE, p.cells());
+		PlanStore.save(level.getServer(), ID, worldBox, p.cells());
+		int stocked = options.survival() ? stockPens(level, p) : 0;
 		a.bounds(-HX + 1, FLOOR, HZN + 1, HX - 1, FLOOR + 16, AZ + 8);
 		a.spot(AnchorNames.ENTRANCE, AX, FEET, AZ + 7, 180);
 		a.put(AnchorNames.SPAWN, AX + 0.5, FEET, AZ + 7.5, 180, 0);
 		AgentCraft.LOGGER.info(
-			"Studio HQ: planned in {} ms, applied {} cells in {} ms ({} changed, {} connections, {} bindings, {} kept, {} foreign replaced, {} drops removed, previous plan {}); total {} ms",
+			"Studio HQ at {}{}: terrain read in {} ms, planned in {} ms, applied {} cells in {} ms ({} changed, {} connections, {} bindings, {} kept, {} foreign replaced, {} drops removed, previous plan {}); total {} ms",
+			HqTerrain.describe(site), options.survival() ? " (survival)" : "", tSample / 1_000_000,
 			tPlan / 1_000_000, st.cells(), st.micros() / 1000, st.changed(), st.connected(), st.bound(), st.kept(), st.foreign(), st.items(),
 			previous == null ? "none" : "known", (System.nanoTime() - t0) / 1_000_000);
 		if (st.changed() + st.connected() < 40 && !st.sample().isEmpty()) {
@@ -206,6 +271,9 @@ public final class StudioHqBuilder implements HqBuilder {
 		}
 		if (st.items() > 0) {
 			r.append(String.format(Locale.ROOT, "; removed %d dropped item%s", st.items(), st.items() == 1 ? "" : "s"));
+		}
+		if (stocked > 0) {
+			r.append(String.format(Locale.ROOT, "; put %d animal%s in the pens", stocked, stocked == 1 ? "" : "s"));
 		}
 		return r.toString();
 	}
@@ -1297,6 +1365,369 @@ public final class StudioHqBuilder implements HqBuilder {
 				p.setIfAir(x, FEET + 1, z, St.light(z == 4 ? 11 : 12));
 			}
 		}
+	}
+
+	// ================================================================== survival
+
+	/**
+	 * Survival worlds: the entrance gets a pair of dark oak doors on a slim timber mullion, glazed
+	 * above, so nothing wanders in at night. The doors sit in the entrance wall (z = AZ + 9), one
+	 * block outside the agents' bounds: no agent path ever crosses them.
+	 */
+	private static void entranceDoors(Plan p) {
+		int zs = AZ + 9;
+		BlockState door = Blocks.DARK_OAK_DOOR.defaultBlockState().setValue(DoorBlock.FACING, S).setValue(DoorBlock.OPEN, false)
+			.setValue(DoorBlock.POWERED, false);
+		for (int x : new int[] {-1, 1}) {
+			// hinges on the outer posts, so both leaves swing away from the mullion
+			DoorHingeSide hinge = x < 0 ? DoorHingeSide.RIGHT : DoorHingeSide.LEFT;
+			p.set(x, FEET, zs, door.setValue(DoorBlock.HINGE, hinge).setValue(DoorBlock.HALF, DoubleBlockHalf.LOWER));
+			p.set(x, FEET + 1, zs, door.setValue(DoorBlock.HINGE, hinge).setValue(DoorBlock.HALF, DoubleBlockHalf.UPPER));
+			p.set(x, FEET + 2, zs, GLASS_PANE); // transom under the arch stones at FEET + 3
+		}
+		p.fill(AX, FEET, zs, AX, FEET + 3, zs, post());
+	}
+
+	/**
+	 * Survival worlds: the back door to the farms, in the north wall at x 18: the one free cell of
+	 * the desk wall's inner row (between the last cabinet at 17 and the terminals from 19), and
+	 * straight across the ring path from the animal farm's east gate (x 18), the crop farm's gate a
+	 * short walk west. A half step down through the hedge onto a path to the ring path. One block
+	 * outside the desks and the terminal slots; closed, it is a wall to the agents like the rest.
+	 */
+	private static void backDoor(Plan p) {
+		backDoor(p, 18);
+		// and one in the middle, under the big north window: the centre cell of the window seat makes
+		// way for it, leaving a three-seat bench on either side
+		backDoor(p, AX);
+		p.set(AX, FEET, HZN + 1, AIR);
+	}
+
+	private static void backDoor(Plan p, int x) {
+		door(p, x, HZN, N);
+		p.set(x, FLOOR, HZN - 1, St.slab(Blocks.MUD_BRICK_SLAB, false)); // replaces the hedge cell
+		for (int z = HZN - 3; z <= HZN - 2; z++) {
+			p.set(x, GROUND, z, Blocks.DIRT_PATH.defaultBlockState());
+			p.set(x, FLOOR, z, AIR);
+		}
+	}
+
+	/**
+	 * Survival worlds: the workbench corner, in the hall's two south-east bays by the merge station
+	 * (between the pilasters at x 17 and 21, and east of 21), right by the bedroom door: a crafting
+	 * table, two chests, a furnace and a smoker, next to the barrel that is already there.
+	 */
+	private static void survivalCorner(Plan p) {
+		int z = HZS - 1;
+		// one double chest (facing north, its left half is the eastern one)
+		BlockState chest = Blocks.CHEST.defaultBlockState().setValue(ChestBlock.FACING, N);
+		p.set(18, FEET, z, Blocks.CRAFTING_TABLE.defaultBlockState());
+		p.set(19, FEET, z, chest.setValue(ChestBlock.TYPE, ChestType.LEFT));
+		p.set(20, FEET, z, chest.setValue(ChestBlock.TYPE, ChestType.RIGHT));
+		p.set(22, FEET, z, Blocks.FURNACE.defaultBlockState().setValue(AbstractFurnaceBlock.FACING, N).setValue(AbstractFurnaceBlock.LIT, false));
+		p.set(23, FEET, z, Blocks.SMOKER.defaultBlockState().setValue(AbstractFurnaceBlock.FACING, N).setValue(AbstractFurnaceBlock.LIT, false));
+	}
+
+	// ================================================================== lean-tos on the terraces
+
+	/** The terrace path meets the lean-to doors here (x = +-17, the terrace steps' line, see HqLandscape.paths). */
+	static final int LEAN_TO_DOOR_X = 17;
+
+	/**
+	 * A timber lean-to on a terrace against the hall's south wall (z 7..12), under the eaves: plinth
+	 * and floor, posts at the corners (and, glazed, in the middle of the front), framed walls, a beam
+	 * ring, a copper shed roof stepping down to the south over a solid ceiling with one block of
+	 * overhang on three sides, and a door onto the meadow at {@code doorX} with a step. Clears what
+	 * the terrace put there first (deck furniture, planters, window boxes, hidden lights).
+	 *
+	 * @param glazed every wall column that is not a post is glass to the ceiling (the conservatory);
+	 *     otherwise plaster with pane windows at {@code windows} (x on the front, z 9..10 on the sides)
+	 */
+	private static void leanTo(Plan p, int x0, int x1, BlockState floor, boolean glazed, int[] windows, int doorX) {
+		int z0 = HZS + 1;
+		int z1 = HZS + 6;
+		int mid = (x0 + x1) / 2;
+		p.fill(x0, FEET, z0, x1, FEET + 5, z1 + 1, AIR);
+		for (int x = x0; x <= x1; x++) {
+			for (int z = z0; z <= z1; z++) {
+				p.set(x, GROUND, z, Blocks.DIRT.defaultBlockState());
+				p.set(x, FLOOR, z, x == x0 || x == x1 || z == z1 ? PLINTH : floor);
+			}
+		}
+		for (int z = z0; z <= z1; z++) {
+			for (int sx : new int[] {x0, x1}) {
+				boolean window = glazed ? z != z0 && z != z1 : z == 9 || z == 10;
+				leanToWall(p, sx, z, z == z0 || z == z1, window, glazed);
+				p.set(sx, FEET + 3, z, beam(Direction.Axis.Z));
+			}
+		}
+		for (int x = x0 + 1; x <= x1 - 1; x++) {
+			boolean post = glazed && x == mid;
+			int wx = x;
+			boolean window = glazed ? x != doorX : java.util.Arrays.stream(windows).anyMatch(w -> w == wx);
+			leanToWall(p, x, z1, post, window, glazed);
+			p.set(x, FEET + 3, z1, beam(Direction.Axis.X));
+		}
+		// shed roof: copper courses stepping down from under the hall's eave (its lowest course is
+		// at y 72 over z 7) to the south
+		for (int z = z0; z <= z1 + 1; z++) {
+			int y = FEET + 5 - (z - z0) / 2;
+			for (int x = x0 - 1; x <= x1 + 1; x++) {
+				boolean over = x < x0 || x > x1 || z > z1;
+				if (!over) {
+					for (int yy = FEET + 3; yy < y; yy++) {
+						p.setIfAir(x, yy, z, ROOF_FULL);
+					}
+				}
+				p.set(x, y, z, St.stairs(ROOF_STAIRS, N, false));
+			}
+		}
+		door(p, doorX, z1, S);
+		p.set(doorX, FLOOR, z1 + 1, St.slab(Blocks.MUD_BRICK_SLAB, false));
+	}
+
+	/** One wall column of a lean-to: a post, or trim + (window or plaster) + (glass when glazed, else plaster). */
+	private static void leanToWall(Plan p, int x, int z, boolean post, boolean window, boolean glazed) {
+		if (post) {
+			p.fill(x, FEET, z, x, FEET + 2, z, post());
+			return;
+		}
+		p.set(x, FEET, z, WALNUT_TRIM);
+		p.set(x, FEET + 1, z, window ? GLASS_PANE : PLASTER);
+		p.set(x, FEET + 2, z, window && glazed ? GLASS_PANE : PLASTER);
+	}
+
+	/**
+	 * Both worlds: the conservatory, a glazed lean-to on the west terrace (x -24..-14, z 7..12), the
+	 * bedroom's counterpart on the other side of the atrium: terracotta tile floor, glass to the
+	 * ceiling between the posts, a potting bench along the west wall, azaleas on moss in the corners,
+	 * a bench and a side table by the south glass, a lantern. A door from the hall's south-west
+	 * corner (by the lounge fire) and one onto the meadow where the terrace path starts. Nothing
+	 * agent-related: no station, no anchor; the doors are closed blocks to the agents' paths.
+	 */
+	private static void conservatory(Plan p) {
+		leanTo(p, -24, -14, TILE, true, new int[0], -LEAN_TO_DOOR_X);
+		BlockState counter = St.slab(Blocks.DARK_OAK_SLAB, true);
+		for (int z = 8; z <= 10; z++) {
+			p.set(-23, FEET, z, counter);
+		}
+		p.set(-23, FEET + 1, 8, St.of(Blocks.POTTED_FERN));
+		p.set(-23, FEET + 1, 9, St.of(Blocks.POTTED_FLOWERING_AZALEA));
+		p.set(-23, FEET + 1, 10, St.candle(Blocks.CANDLE, 2, true));
+		for (int[] c : new int[][] {{-23, 7}, {-15, 7}, {-15, 11}}) {
+			p.set(c[0], FEET, c[1], Blocks.MOSS_BLOCK.defaultBlockState());
+			p.set(c[0], FEET + 1, c[1], (c[0] + c[1]) % 2 == 0 ? Blocks.FLOWERING_AZALEA.defaultBlockState() : Blocks.AZALEA.defaultBlockState());
+		}
+		// bench with its back to the south glass, a side table with a candle
+		p.set(-21, FEET, 11, St.stairs(Blocks.SPRUCE_STAIRS, S, false));
+		p.set(-20, FEET, 11, St.stairs(Blocks.SPRUCE_STAIRS, S, false));
+		p.set(-22, FEET, 11, counter);
+		p.set(-22, FEET + 1, 11, St.candle(Blocks.CANDLE, 1, true));
+		p.set(-19, FEET + 2, 9, LANTERN_HANGING);
+		// from the hall: the south wall's pane column at x -16 becomes the doorway
+		door(p, -16, HZS, S);
+	}
+
+	/**
+	 * Survival worlds: the player's bedroom, a timber lean-to on the east terrace against the hall's
+	 * south wall (x 14..24, z 7..12) under the eaves, with a door from the hall's south-east corner
+	 * (by the workbench corner) and one onto the meadow where the terrace path starts. Nothing
+	 * agent-related: no station, no anchor, and both doors are closed blocks to the agents' paths
+	 * (the hall wall was one already).
+	 */
+	private static void bedroom(Plan p) {
+		leanTo(p, 14, 24, FLOOR_WOOD, false, new int[] {15, 16, 21, 22}, LEAN_TO_DOOR_X);
+		// the room: bed against the east wall, a reading lamp, a chest and books by the west wall, a rug
+		BlockState bed = Blocks.BED.pick(DyeColor.BROWN).defaultBlockState().setValue(BedBlock.FACING, E).setValue(BedBlock.OCCUPIED, false);
+		p.set(22, FEET, 8, bed.setValue(BedBlock.PART, BedPart.FOOT));
+		p.set(23, FEET, 8, bed.setValue(BedBlock.PART, BedPart.HEAD));
+		floorLamp(p, 23, 10);
+		p.set(15, FEET, 8, Blocks.CHEST.defaultBlockState().setValue(ChestBlock.FACING, E).setValue(ChestBlock.TYPE, ChestType.SINGLE));
+		p.set(15, FEET, 10, Blocks.BOOKSHELF.defaultBlockState());
+		p.set(15, FEET + 1, 10, Blocks.BOOKSHELF.defaultBlockState());
+		p.set(21, FEET, 11, St.of(Blocks.POTTED_FLOWERING_AZALEA));
+		for (int x = 17; x <= 21; x++) {
+			for (int z = 8; z <= 10; z++) {
+				boolean border = x == 17 || x == 21 || z == 8 || z == 10;
+				p.set(x, FEET, z, St.carpet(border ? DyeColor.BROWN : DyeColor.WHITE));
+			}
+		}
+		p.set(19, FEET + 2, 9, LANTERN_HANGING);
+		// from the hall: the south wall's pane column at x 16 becomes the doorway
+		door(p, 16, HZS, S);
+	}
+
+	/** A single dark oak door (lower + upper) in a wall cell, closed. */
+	private static void door(Plan p, int x, int z, Direction facing) {
+		BlockState door = Blocks.DARK_OAK_DOOR.defaultBlockState().setValue(DoorBlock.FACING, facing).setValue(DoorBlock.OPEN, false)
+			.setValue(DoorBlock.POWERED, false).setValue(DoorBlock.HINGE, DoorHingeSide.LEFT);
+		p.set(x, FEET, z, door.setValue(DoorBlock.HALF, DoubleBlockHalf.LOWER));
+		p.set(x, FEET + 1, z, door.setValue(DoorBlock.HALF, DoubleBlockHalf.UPPER));
+	}
+
+	// ------------------------------------------------------------------ farms (behind the hall)
+
+	/**
+	 * Survival worlds: the crop farm, west half of the strip behind the hall (north of the ring
+	 * path): a one-block grass walk just inside the fence, then 19 x 11 of farmland in three fields
+	 * (wheat, carrots, potatoes, planted mature), two water channels so every row is wet (waterlogged
+	 * light blocks, so they never freeze), a spruce fence with lanterns, carpets on the corner and
+	 * middle posts to climb it by, a gate onto the ring path, a composter and hay by the gate.
+	 */
+	private static void cropFarm(Plan p) {
+		int[] r = HqLandscape.CROP_FARM;
+		BlockState farmland = Blocks.FARMLAND.defaultBlockState().setValue(FarmlandBlock.MOISTURE, 7);
+		for (int x = r[0] + 1; x <= r[2] - 1; x++) {
+			for (int z = r[1] + 1; z <= r[3] - 1; z++) {
+				// the meadow's tall grass stood here: its upper half would float over the crops
+				p.set(x, FLOOR + 1, z, AIR);
+				if (x == r[0] + 1 || x == r[2] - 1 || z == r[1] + 1 || z == r[3] - 1) {
+					// the walk round the fields: grass, nothing on it, so every row can be reached without trampling
+					p.set(x, GROUND, z, Blocks.GRASS_BLOCK.defaultBlockState());
+					p.set(x, FLOOR, z, AIR);
+					continue;
+				}
+				if (z == -27 || z == -21) {
+					// waterlogged light blocks: water that cannot freeze in a cold biome, and light for the crops at night
+					p.set(x, GROUND, z, St.unfrozenWater(10));
+					p.set(x, FLOOR, z, AIR);
+					continue;
+				}
+				Block crop = x <= -17 ? Blocks.WHEAT : x <= -10 ? Blocks.CARROTS : Blocks.POTATOES;
+				p.set(x, GROUND, z, farmland);
+				p.set(x, FLOOR, z, crop.defaultBlockState().setValue(CropBlock.AGE, 7));
+			}
+		}
+		fenceRing(p, r[0], r[1], r[2], r[3]);
+		fenceGate(p, -13, r[3], S);
+		// carpets to climb the fence by: the four corners, the middle of the back and of both sides, and
+		// either side of the gate at the front
+		BlockState step = St.carpet(DyeColor.WHITE);
+		int cx = -13;
+		int cz = (r[1] + r[3]) / 2;
+		for (int[] c : new int[][] {{r[0], r[1]}, {r[2], r[1]}, {r[0], r[3]}, {r[2], r[3]}, {cx, r[1]}, {r[0], cz}, {r[2], cz},
+			{cx - 1, r[3]}, {cx + 1, r[3]}}) {
+			p.set(c[0], FLOOR + 1, c[1], step);
+		}
+		for (int z = r[3] + 1; z <= r[3] + 2; z++) {
+			p.set(-13, GROUND, z, Blocks.DIRT_PATH.defaultBlockState());
+		}
+		p.set(-16, FLOOR, r[3] + 1, Blocks.COMPOSTER.defaultBlockState());
+		p.set(-10, FLOOR, r[3] + 1, Blocks.HAY_BLOCK.defaultBlockState());
+	}
+
+	/** Pens of the animal farm (interior cells, inclusive) and who lives there. */
+	private static final int[][] PENS = {
+		// x0, z0, x1, z1
+		{3, -30, 12, -25},   // cows
+		{14, -30, 23, -25},  // pigs
+		{3, -23, 12, -18},   // sheep
+		{14, -23, 23, -18},  // chickens
+	};
+
+	/**
+	 * Survival worlds: the animal farm, east half of the strip behind the hall: four 10 x 6 pens in
+	 * a spruce fence cross (cows and pigs at the back, sheep and chickens at the front), every pen
+	 * with its own gate from outside, lanterns on the posts, and a carpet on every post where fence
+	 * lines meet (the four corners, the four ends of the cross, its centre): a player can jump onto
+	 * a carpet on a fence and so climb in or out of any pen anywhere, the animals cannot. Two of
+	 * each animal are put in after the build ({@link #stockPens}); breeding is the player's.
+	 */
+	private static void animalFarm(Plan p) {
+		int[] r = HqLandscape.ANIMAL_FARM;
+		fenceRing(p, r[0], r[1], r[2], r[3]);
+		for (int z = r[1]; z <= r[3]; z++) {
+			fencePost(p, 13, z, z == -24);
+		}
+		for (int x = r[0]; x <= r[2]; x++) {
+			fencePost(p, x, -24, false);
+		}
+		fenceGate(p, 7, r[3], S);
+		fenceGate(p, 18, r[3], S);
+		fenceGate(p, r[0], -27, W);
+		fenceGate(p, r[2], -27, E);
+		BlockState step = St.carpet(DyeColor.WHITE);
+		for (int x : new int[] {r[0], 13, r[2]}) {
+			for (int z : new int[] {r[1], -24, r[3]}) {
+				p.set(x, FLOOR + 1, z, step);
+			}
+		}
+		// nothing solid and nothing two blocks tall inside a pen: an animal standing on a block (or a
+		// chicken fluttering up a tall plant) clears the fence, so the meadow's tall grass and large
+		// ferns become short grass and anything else above the floor goes
+		for (int[] pen : PENS) {
+			for (int x = pen[0]; x <= pen[2]; x++) {
+				for (int z = pen[1]; z <= pen[3]; z++) {
+					if (!p.isAir(x, FLOOR + 1, z)) {
+						p.set(x, FLOOR + 1, z, AIR);
+						p.set(x, FLOOR, z, Blocks.SHORT_GRASS.defaultBlockState());
+					}
+				}
+			}
+		}
+		for (int z = r[3] + 1; z <= r[3] + 2; z++) {
+			p.set(7, GROUND, z, Blocks.DIRT_PATH.defaultBlockState());
+			p.set(18, GROUND, z, Blocks.DIRT_PATH.defaultBlockState());
+		}
+	}
+
+	/** A spruce fence round a rectangle, a lantern on every corner and every sixth post. */
+	private static void fenceRing(Plan p, int x0, int z0, int x1, int z1) {
+		for (int x = x0; x <= x1; x++) {
+			boolean lit = x == x0 || x == x1 || (x - x0) % 6 == 0;
+			fencePost(p, x, z0, lit);
+			fencePost(p, x, z1, lit);
+		}
+		for (int z = z0 + 1; z <= z1 - 1; z++) {
+			boolean lit = (z - z0) % 6 == 0;
+			fencePost(p, x0, z, lit);
+			fencePost(p, x1, z, lit);
+		}
+	}
+
+	/** The farms stand on the meadow: fences, gates and the things by them sit on the grass top (GROUND), at FLOOR, not at the hall's FEET. */
+	private static void fencePost(Plan p, int x, int z, boolean lantern) {
+		p.set(x, GROUND, z, Blocks.GRASS_BLOCK.defaultBlockState());
+		p.set(x, FLOOR, z, Blocks.SPRUCE_FENCE.defaultBlockState());
+		p.set(x, FLOOR + 1, z, lantern ? LANTERN : AIR);
+	}
+
+	private static void fenceGate(Plan p, int x, int z, Direction facing) {
+		p.set(x, GROUND, z, Blocks.GRASS_BLOCK.defaultBlockState());
+		p.set(x, FLOOR, z, Blocks.SPRUCE_FENCE_GATE.defaultBlockState().setValue(FenceGateBlock.FACING, facing).setValue(FenceGateBlock.OPEN, false));
+		p.set(x, FLOOR + 1, z, AIR);
+	}
+
+	/**
+	 * Two of each animal in their pens, after the blocks are in: only what a pen is short of, so a
+	 * rebuild never adds to a herd the player has bred. Returns how many were added.
+	 */
+	private static int stockPens(ServerLevel level, Plan p) {
+		List<ResourceKey<EntityType<?>>> kinds = List.of(EntityTypeIds.COW, EntityTypeIds.PIG, EntityTypeIds.SHEEP, EntityTypeIds.CHICKEN);
+		int added = 0;
+		for (int i = 0; i < PENS.length; i++) {
+			int[] pen = PENS[i];
+			// the pens are meadow: animals stand on the grass top (GROUND) at FLOOR height, not the hall's FEET
+			AABB box = new AABB(pen[0] + p.ox, FLOOR + p.oy - 1, pen[1] + p.oz, pen[2] + p.ox + 1, FLOOR + p.oy + 3, pen[3] + p.oz + 1);
+			EntityType<?> kind = BuiltInRegistries.ENTITY_TYPE.getValueOrThrow(kinds.get(i));
+			added += stock(level, kind, box, (pen[0] + pen[2]) / 2 + p.ox, FLOOR + p.oy, (pen[1] + pen[3]) / 2 + p.oz);
+		}
+		return added;
+	}
+
+	private static int stock(ServerLevel level, EntityType<?> kind, AABB box, int cx, int y, int cz) {
+		int have = level.getEntities(kind, box, e -> true).size();
+		int added = 0;
+		for (int i = have; i < 2; i++) {
+			Entity animal = kind.spawn(level, new BlockPos(cx - 1 + 2 * i, y, cz), EntitySpawnReason.EVENT);
+			if (animal != null) {
+				if (animal instanceof Mob mob) {
+					mob.setPersistenceRequired();
+				}
+				added++;
+			}
+		}
+		return added;
 	}
 
 	// ================================================================== cameras

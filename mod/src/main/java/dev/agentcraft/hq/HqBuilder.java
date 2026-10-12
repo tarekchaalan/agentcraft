@@ -1,7 +1,9 @@
 package dev.agentcraft.hq;
 
 import dev.agentcraft.layout.Anchors;
+import dev.agentcraft.world.HqSite;
 import net.minecraft.server.level.ServerLevel;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Builds an HQ into the world and describes it with anchors. Registered in {@link HqBuilders};
@@ -22,18 +24,29 @@ public interface HqBuilder {
 	void build(ServerLevel level, Anchors.Builder anchors);
 
 	/**
-	 * How a build was asked for: {@code force} = reset every cell of the site to the plan, even the
-	 * ones the player changed since the last build (builders that keep such cells honour it).
+	 * How a build was asked for.
+	 *
+	 * @param force reset every cell of the site to the plan, even the ones the player changed since
+	 *     the last build (builders that keep such cells honour it).
+	 * @param site where to build in a world with its own terrain: the plan's origin is placed there
+	 *     and the ground is blended into the surroundings. Null = the studio world's flat meadow at
+	 *     the origin (builders that cannot move ignore it).
+	 * @param survival the world is played in survival: builders add what that needs (doors, a bed and
+	 *     tools, lighting that keeps mobs from spawning on the site).
 	 */
-	record Options(boolean force) {
-		public static final Options DEFAULT = new Options(false);
+	record Options(boolean force, @Nullable HqSite site, boolean survival) {
+		public static final Options DEFAULT = new Options(false, null, false);
+
+		public Options(boolean force) {
+			this(force, null, false);
+		}
 	}
 
 	/**
 	 * Builds with options and returns a one-line report for the player (null = nothing to say).
 	 * The default ignores the options.
 	 */
-	default @org.jspecify.annotations.Nullable String build(ServerLevel level, Anchors.Builder anchors, Options options) {
+	default @Nullable String build(ServerLevel level, Anchors.Builder anchors, Options options) {
 		build(level, anchors);
 		return null;
 	}

@@ -33,7 +33,8 @@ The mod also runs in a normal Fabric instance for Minecraft 26.3 with Fabric Loa
 2. Set the instance's environment variables `AGENTCRAFT_MUTE=0` (otherwise the mod forces your
    master and music volume to 0) and `AGENTCRAFT_FOCUS=1`. See mod/DEV.md for the rest.
 3. Start only the Foreman: `node tools/unix.mjs launch --no-game --backend sim` (or `--repo ...`).
-4. Launch the instance. The title screen loads (or creates) the `AgentCraft HQ` world.
+4. Launch the instance. The title screen loads (or creates) the `AgentCraft HQ` world (or
+   `AgentCraft Survival` with `AGENTCRAFT_WORLD=survival` in the instance's environment).
 
 `node tools/devcli.mjs state` reports the running game either way while the DevBridge is on.
 
@@ -72,6 +73,8 @@ If the game of this checkout is already running it is reused (one client per che
 | parameter | default | |
 | --- | --- | --- |
 | `-Backend sim\|claude` | `claude` (`AGENTCRAFT_BACKEND`) | `-Showcase` implies `sim` |
+| `-World studio\|survival` | `studio` (`AGENTCRAFT_WORLD`) | which world the game opens: the agents' creative meadow, or a normal world in survival mode with the HQ built into its terrain (`AgentCraft Survival`) |
+| `-Seed <n or text>` | studio: fixed; survival: random | seed of a world created on this launch (`AGENTCRAFT_WORLD_SEED`) |
 | `-Repo <path>[,<path>]` | | registered at start, or sent as `repo.add` to a running Foreman |
 | `-Profile <name>` | backend name; `showcase` / `showcase-late` | state lives in `<home>/<profile>` |
 | `-Showcase [busy\|late]` | | hold a static scripted state (QA screenshots); always a fresh (`--reset`) profile |

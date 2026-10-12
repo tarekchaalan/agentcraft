@@ -201,13 +201,27 @@ public final class Anchors {
 		private final String name;
 		private final Map<String, Anchor> anchors = new LinkedHashMap<>();
 		private @Nullable Bounds bounds;
+		private int dx;
+		private int dy;
+		private int dz;
 
 		private Builder(String name) {
 			this.name = name;
 		}
 
+		/**
+		 * World offset added to every anchor and to the bounds put from now on: a builder plans at
+		 * its design origin and is placed at the HQ site ({@code dev.agentcraft.world.HqSite}).
+		 */
+		public Builder offset(int dx, int dy, int dz) {
+			this.dx = dx;
+			this.dy = dy;
+			this.dz = dz;
+			return this;
+		}
+
 		public Builder put(String anchorName, double x, double y, double z, float yaw, float pitch) {
-			anchors.put(anchorName, new Anchor(anchorName, x, y, z, yaw, pitch));
+			anchors.put(anchorName, new Anchor(anchorName, x + dx, y + dy, z + dz, yaw, pitch));
 			return this;
 		}
 
@@ -233,8 +247,8 @@ public final class Anchors {
 		}
 
 		public Builder bounds(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
-			this.bounds = new Bounds(Math.min(minX, maxX), Math.min(minY, maxY), Math.min(minZ, maxZ),
-				Math.max(minX, maxX), Math.max(minY, maxY), Math.max(minZ, maxZ));
+			this.bounds = new Bounds(Math.min(minX, maxX) + dx, Math.min(minY, maxY) + dy, Math.min(minZ, maxZ) + dz,
+				Math.max(minX, maxX) + dx, Math.max(minY, maxY) + dy, Math.max(minZ, maxZ) + dz);
 			return this;
 		}
 
