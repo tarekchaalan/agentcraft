@@ -27,10 +27,22 @@ public final class StationInteractions {
 		void use(Player player, BlockPos pos, BlockState state, @Nullable StationBlockEntity be);
 	}
 
+	/** A gate in front of the handler: true means the click was consumed elsewhere (MP-11 visitor). */
+	@FunctionalInterface
+	public interface Gate {
+		boolean before(Player player, BlockPos pos, BlockState state, @Nullable StationBlockEntity be);
+	}
+
 	private static final Map<Block, Handler> HANDLERS = new ConcurrentHashMap<>();
+	private static volatile @Nullable Gate gate;
 	private static boolean registered;
 
 	private StationInteractions() {
+	}
+
+	/** Install the one visitor gate; null removes it. Read at click time, never cached. */
+	public static void setGate(@Nullable Gate next) {
+		gate = next;
 	}
 
 	public static synchronized void onUse(Block block, Handler handler) {
@@ -47,7 +59,12 @@ public final class StationInteractions {
 				if (h == null) {
 					return InteractionResult.PASS;
 				}
-				h.use(player, pos, state, level.getBlockEntity(pos) instanceof StationBlockEntity be ? be : null);
+				StationBlockEntity be = level.getBlockEntity(pos) instanceof StationBlockEntity s ? s : null;
+				Gate g = gate;
+				if (g != null && g.before(player, pos, state, be)) {
+					return InteractionResult.FAIL;
+				}
+				h.use(player, pos, state, be);
 				return InteractionResult.FAIL;
 			});
 		}

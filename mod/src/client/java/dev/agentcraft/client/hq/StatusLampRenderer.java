@@ -11,6 +11,8 @@ import dev.agentcraft.client.foreman.Protocol.Agent;
 import dev.agentcraft.client.foreman.Protocol.Goal;
 import dev.agentcraft.client.foreman.Protocol.Task;
 import dev.agentcraft.client.foreman.Protocol.TaskStatus;
+import dev.agentcraft.client.mp.StudioView;
+import dev.agentcraft.client.mp.Studios;
 import dev.agentcraft.client.ui.Kit;
 import dev.agentcraft.client.ui.TextUtil;
 import dev.agentcraft.client.ui.UiStyle;
@@ -18,8 +20,14 @@ import dev.agentcraft.client.ui.WorldUi;
 import dev.agentcraft.client.world.StationRenderState;
 import dev.agentcraft.client.world.StationRenderer;
 import dev.agentcraft.layout.Anchors;
+import dev.agentcraft.mp.state.Counts;
+import dev.agentcraft.mp.state.GoalStatusWire;
+import dev.agentcraft.mp.state.GoalSummary;
+import dev.agentcraft.mp.state.PublicAgent;
+import dev.agentcraft.mp.state.PublicStudioState;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -86,8 +94,54 @@ public class StatusLampRenderer extends StationRenderer<StatusLampBlockEntity, S
 		return 96;
 	}
 
+	/**
+	 * The visitor look of the goal hologram: status and progress from the public state, goal text
+	 * only when the owner opted in. Task and agent numbers come from the public {@link Counts}; no
+	 * task title, question or log text.
+	 */
+	public record RemoteHologram(boolean hasGoal, boolean goalTextVisible, String statusWord, String statusFamily, double progress, String percent,
+		@Nullable String goalText, String line1, String line2a, String line2b) {
+	}
+
+	/** The remote hologram model from a public state ({@code null} = the remote state has not arrived). */
+	public static RemoteHologram remoteHologram(@Nullable PublicStudioState state) {
+		if (state == null) {
+			return new RemoteHologram(false, false, "NO GOAL", "idle", 0, "–", null, "No public state", "", "");
+		}
+		Counts c = state.counts();
+		GoalSummary g = state.goal();
+		boolean hasGoal = g.status() != GoalStatusWire.NONE;
+		boolean goalTextVisible = hasGoal && state.policy().goalText() && g.text() != null;
+		double progress = hasGoal ? Math.max(0, Math.min(1, g.progress())) : 0;
+		String statusFamily = switch (g.status()) {
+			case PLANNING -> "thinking";
+			case ACTIVE -> "working";
+			case DONE -> "done";
+			case FAILED -> "error";
+			default -> "idle";
+		};
+		int total = c.todo() + c.doing() + c.review() + c.done() + c.blocked();
+		int agents = 0;
+		for (PublicAgent a : state.agents()) {
+			if (a.active()) {
+				agents++;
+			}
+		}
+		String line1 = c.done() + " of " + total + " tasks done" + (c.doing() > 0 ? "  ·  " + c.doing() + " in progress" : "");
+		String line2a = plural(agents, "agent") + " active" + (c.review() > 0 ? "  ·  " + c.review() + " in review" : "");
+		// a remote studio's decisions wait for its owner, not for the visitor: never "need you"
+		String line2b = c.openDecisions() > 0 ? "  ·  " + c.openDecisions() + (c.openDecisions() == 1 ? " decision waiting" : " decisions waiting") : "";
+		return new RemoteHologram(hasGoal, goalTextVisible, hasGoal ? g.status().wire().toUpperCase(Locale.ROOT) : "NO GOAL", statusFamily, progress,
+			hasGoal ? Math.round(progress * 100) + "%" : "–", goalTextVisible ? g.text() : null, line1, line2a, line2b);
+	}
+
 	@Override
 	protected void extractStation(StatusLampBlockEntity be, State s, float partialTicks) {
+		Optional<StudioView> maybe = Studios.at(be.getBlockPos());
+		if (maybe.isPresent() && !maybe.get().own()) {
+			extractRemote(be, s, maybe.get());
+			return;
+		}
 		s.status = be.getBlockState().getValue(StatusLampBlock.STATUS);
 		s.hologram = ATRIUM_BINDING.equals(s.binding);
 		ForemanState fs = Foreman.state();
@@ -120,6 +174,70 @@ public class StatusLampRenderer extends StationRenderer<StatusLampBlockEntity, S
 			dev.agentcraft.client.agents.PlateLayout.reserve(p.getX() + 0.5, p.getY() + HOLO_Y - CARD_H / 2f * WorldUi.PX * K, p.getZ() + 0.5,
 				s.cardW + 8, CARD_H + 8, WorldUi.PX * K);
 		}
+	}
+
+	/**
+	 * The visitor look for a remote studio. The lamp colour is still the (server-authoritative) block
+	 * state; only the waiting frame, online gate and goal hologram use the view. It never reads
+	 * {@link Foreman} or the viewer's anchor layout.
+	 */
+	private static void extractRemote(StatusLampBlockEntity be, State s, StudioView view) {
+		PublicStudioState ps = view.publicState();
+		s.status = be.getBlockState().getValue(StatusLampBlock.STATUS);
+		s.hologram = ATRIUM_BINDING.equals(s.binding);
+		s.stale = !view.online() || ps == null;
+		s.frameFace = null;
+		if (s.status == LampStatus.WAITING && !s.stale && (DECISIONS_BINDING.equals(s.binding) || MERGE_BINDING.equals(s.binding))
+			&& be.getLevel() != null) {
+			double best = Double.MAX_VALUE;
+			Anchors.Bounds b = view.layout().bounds();
+			double cx = b == null ? 0 : (b.minX() + b.maxX()) / 2.0;
+			double cz = b == null ? 0 : (b.minZ() + b.maxZ()) / 2.0;
+			for (Direction d : Direction.Plane.HORIZONTAL) {
+				net.minecraft.core.BlockPos n = be.getBlockPos().relative(d);
+				if (be.getLevel().getBlockState(n).isAir()) {
+					double dist = Math.hypot(n.getX() + 0.5 - cx, n.getZ() + 0.5 - cz);
+					if (dist < best) {
+						best = dist;
+						s.frameFace = d;
+					}
+				}
+			}
+			s.frameHalf = DECISIONS_BINDING.equals(s.binding) ? 2.5f : 1.5f;
+		}
+		if (s.hologram) {
+			applyRemoteHologram(s, remoteHologram(ps));
+			net.minecraft.core.BlockPos p = be.getBlockPos();
+			dev.agentcraft.client.agents.PlateLayout.reserve(p.getX() + 0.5, p.getY() + HOLO_Y - CARD_H / 2f * WorldUi.PX * K, p.getZ() + 0.5,
+				s.cardW + 8, CARD_H + 8, WorldUi.PX * K);
+		}
+	}
+
+	private static void applyRemoteHologram(State s, RemoteHologram h) {
+		s.hasGoal = h.hasGoal();
+		s.progress = h.progress();
+		s.percent = h.percent();
+		s.statusWord = h.statusWord();
+		s.statusColor = UiStyle.status(h.statusFamily());
+		s.line1 = h.line1();
+		s.line2a = h.line2a();
+		s.line2b = h.line2b();
+		Font font = Minecraft.getInstance().font;
+		if (h.goalTextVisible() && h.goalText() != null) {
+			// the goal wraps to 3 lines (wider column) before anything is cut, like the own hologram
+			List<String> lines = TextUtil.wrapPlain(font, h.goalText().replace("`", ""), TEXT_W);
+			if (lines.size() > 3) {
+				lines = List.of(lines.get(0), lines.get(1), TextUtil.ellipsize(font, String.join(" ", lines.subList(2, lines.size())), TEXT_W));
+			}
+			s.goalLines = List.copyOf(lines);
+		} else {
+			s.goalLines = List.of("Goal text not shared");
+		}
+		int w = Math.max(font.width(s.line1), font.width(s.line2a) + font.width(s.line2b));
+		for (String l : s.goalLines) {
+			w = Math.max(w, font.width(l));
+		}
+		s.cardW = Math.max(CARD_W, 84 + w + 12);
 	}
 
 	private static void extractHologram(State s) {

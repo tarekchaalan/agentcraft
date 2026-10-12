@@ -9,14 +9,19 @@ import dev.agentcraft.client.foreman.Foreman;
 import dev.agentcraft.client.foreman.Protocol.Decision;
 import dev.agentcraft.client.hud.Keys;
 import dev.agentcraft.client.hud.UiBits;
+import dev.agentcraft.client.mp.StudioView;
+import dev.agentcraft.client.mp.Studios;
 import dev.agentcraft.client.ui.Kit;
 import dev.agentcraft.client.ui.TextUtil;
 import dev.agentcraft.client.ui.UiStyle;
 import dev.agentcraft.client.ui.WorldUi;
 import dev.agentcraft.client.world.StationRenderState;
 import dev.agentcraft.client.world.StationRenderer;
+import dev.agentcraft.mp.StudioId;
+import dev.agentcraft.mp.state.PublicStudioState;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.SubmitNodeCollector;
@@ -55,6 +60,8 @@ public class DecisionPodiumRenderer extends StationRenderer<DecisionPodiumBlockE
 		public List<FormattedCharSequence> lines = List.of();
 		public int width = W;
 		public boolean stale;
+		/** Remote studios show a visitor card: count + waiting face, never the question or the key hint. */
+		public boolean remote;
 		/** Size factor for the camera distance (constant screen size past {@link #GROW_FROM} blocks). */
 		public float grow = 1f;
 	}
@@ -64,8 +71,9 @@ public class DecisionPodiumRenderer extends StationRenderer<DecisionPodiumBlockE
 		return 6 + 10 + 3 + 10 + lines * 10 + 4;
 	}
 
-	private record Cache(long revision, String decisionId, int count, String header, FormattedCharSequence name, FormattedCharSequence kind, int nameWidth,
-		List<FormattedCharSequence> lines, int width) {
+	/** {@code studio} is the remote studio id for a remote card, {@code null} for the own one. */
+	private record Cache(@Nullable StudioId studio, long revision, String decisionId, int count, String header, FormattedCharSequence name,
+		FormattedCharSequence kind, int nameWidth, List<FormattedCharSequence> lines, int width) {
 	}
 
 	private @Nullable Cache cache;
@@ -83,6 +91,11 @@ public class DecisionPodiumRenderer extends StationRenderer<DecisionPodiumBlockE
 
 	@Override
 	protected void extractStation(DecisionPodiumBlockEntity be, State s, float partialTicks) {
+		Optional<StudioView> maybe = Studios.at(be.getBlockPos());
+		if (maybe.isPresent() && !maybe.get().own()) {
+			extractRemote(s, maybe.get());
+			return;
+		}
 		// no allocation per frame: count the waiting ones and keep the first
 		Decision d = null;
 		int count = 0;
@@ -95,6 +108,7 @@ public class DecisionPodiumRenderer extends StationRenderer<DecisionPodiumBlockE
 			}
 		}
 		s.count = count;
+		s.remote = false;
 		s.stale = Foreman.state() == null || Foreman.state().isStale();
 		DecisionsFeature.syncPodium(be.getBlockPos(), be.getBlockState(), count > 0);
 		if (d == null) {
@@ -104,7 +118,7 @@ public class DecisionPodiumRenderer extends StationRenderer<DecisionPodiumBlockE
 		s.agentId = d.agentId();
 		s.nameColor = UiBits.nameOnLight(d.agentId());
 		Cache c = cache;
-		if (c == null || c.revision() != s.foremanRevision || !c.decisionId().equals(d.id()) || c.count() != s.count) {
+		if (c == null || c.studio() != null || c.revision() != s.foremanRevision || !c.decisionId().equals(d.id()) || c.count() != s.count) {
 			Font font = Minecraft.getInstance().font;
 			String header = s.count == 1 ? "1 decision waiting" : s.count + " decisions waiting";
 			String name = UiBits.agentName(d.agentId());
@@ -118,17 +132,57 @@ public class DecisionPodiumRenderer extends StationRenderer<DecisionPodiumBlockE
 				String third = String.join(" ", plain.subList(2, plain.size()));
 				lines.set(2, Component.literal(TextUtil.ellipsize(font, third, inner)).getVisualOrderText());
 			}
-			c = new Cache(s.foremanRevision, d.id(), s.count, header, Component.literal(name).getVisualOrderText(), Component.literal(kind)
+			c = new Cache(null, s.foremanRevision, d.id(), s.count, header, Component.literal(name).getVisualOrderText(), Component.literal(kind)
 				.getVisualOrderText(), font.width(name), List.copyOf(lines), W);
 			cache = c;
 		}
+		applyCache(s, c);
+		layoutPlacement(s);
+	}
+
+	/**
+	 * The visitor card: the public open-decision count and the first public agent that waits. It never
+	 * reads {@link Foreman}, the decision question or the viewer's queue. Cached per remote studio and
+	 * public-state revision, never by {@code foremanRevision}.
+	 */
+	private void extractRemote(State s, StudioView view) {
+		PublicStudioState ps = view.publicState();
+		DecisionQueue.RemotePodium m = DecisionQueue.remote(ps);
+		s.remote = true;
+		s.count = m.count();
+		s.stale = !view.online() || ps == null;
+		s.agentId = m.agentId();
+		s.kindSeq = FormattedCharSequence.EMPTY;
+		s.lines = List.of();
+		s.width = W;
+		if (s.count <= 0) {
+			return;
+		}
+		long rev = ps == null ? -1 : ps.rev();
+		Cache c = cache;
+		if (c == null || !view.id().equals(c.studio()) || c.revision() != rev || c.count() != s.count) {
+			Font font = Minecraft.getInstance().font;
+			String name = m.agentName() == null ? "" : m.agentName();
+			c = new Cache(view.id(), rev, "remote", s.count, m.header(), Component.literal(name).getVisualOrderText(), FormattedCharSequence.EMPTY,
+				font.width(name), List.of(), W);
+			cache = c;
+		}
+		applyCache(s, c);
+		s.nameColor = UiBits.nameOnLight(s.agentId);
+		layoutPlacement(s);
+	}
+
+	private static void applyCache(State s, Cache c) {
 		s.header = c.header();
 		s.nameSeq = c.name();
 		s.kindSeq = c.kind();
 		s.nameWidth = c.nameWidth();
 		s.lines = c.lines();
 		s.width = c.width();
+	}
 
+	/** Grow-from-distance and the nameplate reserve, shared by the own and the remote card. */
+	private static void layoutPlacement(State s) {
 		// world size up to GROW_FROM blocks away, then it grows with the distance (constant screen size,
 		// at most GROW_MAX) so the waiting count still reads from across the room
 		double bx = s.blockPos.getX() + 0.5;
@@ -143,7 +197,7 @@ public class DecisionPodiumRenderer extends StationRenderer<DecisionPodiumBlockE
 
 	@Override
 	public void submit(State s, PoseStack poseStack, SubmitNodeCollector collector, CameraRenderState camera) {
-		if (s.count <= 0 || s.agentId == null) {
+		if (s.count <= 0) {
 			return;
 		}
 		Font font = Minecraft.getInstance().font;
@@ -174,11 +228,13 @@ public class DecisionPodiumRenderer extends StationRenderer<DecisionPodiumBlockE
 			light);
 		WorldUi.submitSprite(poseStack, collector, WorldUi.Layer.OVERLAY, Kit.dot("waiting", false), tx, ty, 7, 7, 0.15f, 0xFFFFFFFF, light);
 		WorldUi.submitText(poseStack, collector, s.header, tx + 11, ty, s.stale ? UiBits.muted() : UiStyle.CLAY_DARK, light);
-		String key = Keys.decisions == null ? "J" : Keys.label(Keys.decisions);
-		int kw = font.width(key);
-		float kx = x0 + w - 8 - kw - 8;
-		WorldUi.submitNineSlice(poseStack, collector, WorldUi.Layer.SOLID, Kit.KEYCAP, kx, ty - 2, kw + 8, 12, 0xFFFFFFFF, light);
-		WorldUi.submitText(poseStack, collector, key, kx + 4, ty, UiStyle.color("palette.ui.text", 0xFF34312E), light);
+		if (!s.remote) {
+			String key = Keys.decisions == null ? "J" : Keys.label(Keys.decisions);
+			int kw = font.width(key);
+			float kx = x0 + w - 8 - kw - 8;
+			WorldUi.submitNineSlice(poseStack, collector, WorldUi.Layer.SOLID, Kit.KEYCAP, kx, ty - 2, kw + 8, 12, 0xFFFFFFFF, light);
+			WorldUi.submitText(poseStack, collector, key, kx + 4, ty, UiStyle.color("palette.ui.text", 0xFF34312E), light);
+		}
 		ty += 10 + 3;
 		// divider
 		WorldUi.submitFill(poseStack, collector, tx, ty - 2, x0 + w - 8, ty - 1, UiStyle.color("palette.ui.edge", 0xFFC9BBA3), light);

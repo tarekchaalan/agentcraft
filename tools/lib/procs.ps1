@@ -119,10 +119,22 @@ function Wait-ProcExit([int]$ProcessId, [string]$Start, [double]$TimeoutSec) {
 }
 
 # Force-kill a process we started and everything it started. Returns the pids it killed.
-function Stop-OwnTree([int]$ProcessId, [string]$Start) {
+# -KeepGradleDaemons (tools/mp.mjs, for an unfinished build) leaves a Gradle daemon that the tree
+# started, and whatever that daemon started, running: a daemon outlives its build and is shared.
+function Stop-OwnTree([int]$ProcessId, [string]$Start, [switch]$KeepGradleDaemons) {
     $killed = @()
     if (-not (Test-SameProc $ProcessId $Start)) { return $killed }
-    foreach ($d in (Get-Descendants $ProcessId)) {
+    $tree = @(Get-Descendants $ProcessId)
+    $kept = @{}
+    if ($KeepGradleDaemons) {
+        # Deepest first, so from the end every parent is seen before its children.
+        for ($i = $tree.Count - 1; $i -ge 0; $i--) {
+            $d = $tree[$i]
+            if ($kept.ContainsKey([int]$d.ParentProcessId) -or ([string]$d.CommandLine).Contains('GradleDaemon')) { $kept[[int]$d.ProcessId] = $true }
+        }
+    }
+    foreach ($d in $tree) {
+        if ($kept.ContainsKey([int]$d.ProcessId)) { continue }
         try { Stop-Process -Id $d.ProcessId -Force -ErrorAction Stop; $killed += [int]$d.ProcessId } catch {}
     }
     try { Stop-Process -Id $ProcessId -Force -ErrorAction Stop; $killed += $ProcessId } catch {}

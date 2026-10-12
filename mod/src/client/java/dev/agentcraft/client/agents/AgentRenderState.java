@@ -11,6 +11,7 @@ import org.jspecify.annotations.Nullable;
  */
 public class AgentRenderState extends AvatarRenderState {
 	public @Nullable AgentRenderer renderer;
+	/** Studio-qualified key for declutter tracks; public cast id remains on the entity's AgentView. */
 	public String agentId = "";
 	public AgentPose pose = AgentPose.STAND;
 	/** The nameplate to draw this frame (full or compact, chosen by {@link PlateLayout}), or null (too far). */

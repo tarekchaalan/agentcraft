@@ -7,8 +7,11 @@ import dev.agentcraft.client.hud.UiBits;
 import dev.agentcraft.client.foreman.Protocol.FeedItem;
 import dev.agentcraft.client.foreman.Protocol.Goal;
 import dev.agentcraft.client.foreman.Protocol.LogEntry;
+import dev.agentcraft.client.mp.StudioView;
 import dev.agentcraft.client.ui.TextUtil;
 import dev.agentcraft.client.ui.UiStyle;
+import dev.agentcraft.mp.state.Counts;
+import dev.agentcraft.mp.state.GoalStatusWire;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -56,6 +59,11 @@ final class MonitorScreen {
 	long agentSeq = Long.MIN_VALUE;
 	Mode mode = Mode.CONNECTING;
 	String connectText = "";
+	/** Non-null while this panel shows a remote studio; the own layout path leaves it null. */
+	@Nullable RemoteMonitorView remoteView;
+	/** The stable {@link StudioView} and binding the current remote view was built from. */
+	@Nullable StudioView remoteSource;
+	String remoteBinding = "";
 
 	// --- geometry (face px; origin = panel top-left)
 	float bx0, by0, bx1, by1;     // inside the bezel
@@ -135,6 +143,9 @@ final class MonitorScreen {
 		if (same) {
 			return false;
 		}
+		remoteView = null;
+		remoteSource = null;
+		remoteBinding = "";
 		boolean geometryChanged = st != style || ppb != this.ppb || panelW != this.panelW || panelH != this.panelH;
 		boolean sameAgent = id.equals(agentId) && m == mode;
 		this.mode = m;
@@ -163,6 +174,148 @@ final class MonitorScreen {
 
 	private static String connectText(@Nullable ForemanState s) {
 		return DisplayText.noData(s);
+	}
+
+	/**
+	 * Build the view from the studio only when its snapshot, the binding, the look or the panel size
+	 * changed, so a steady frame allocates nothing. The {@link StudioView} registry hands out a stable
+	 * instance until a state update replaces it. Returns true when a layout rebuilt.
+	 */
+	boolean syncRemoteSource(StudioView v, String binding, ScreenStyle st, int ppb, int panelW, int panelH) {
+		if (remoteUpToDate(v, binding, st, ppb, panelW, panelH)) {
+			return false;
+		}
+		remoteSource = v;
+		remoteBinding = binding;
+		return syncRemote(RemoteMonitorView.of(v.publicState(), v.online(), binding), st, ppb, panelW, panelH);
+	}
+
+	/**
+	 * True when the remote layout this screen holds was built from this snapshot and binding
+	 * <em>and</em> for this look and panel size: every input of {@link #syncRemote}, so a look switch
+	 * or a resized panel rebuilds without waiting for the studio's next state. Pure, no client needed.
+	 */
+	boolean remoteUpToDate(StudioView v, String binding, ScreenStyle st, int ppb, int panelW, int panelH) {
+		return v == remoteSource && binding.equals(remoteBinding) && st == style && ppb == this.ppb && panelW == this.panelW
+			&& panelH == this.panelH;
+	}
+
+	/**
+	 * Rebuild from a remote studio's public view instead of the viewer's Foreman. No log, diff or
+	 * path is ever read; {@link #rows} is empty for an agent and holds only the public counts in feed
+	 * mode, and the cache key is the view (which carries the remote state's {@code rev}). Returns true
+	 * when it rebuilt.
+	 */
+	boolean syncRemote(RemoteMonitorView v, ScreenStyle st, int ppb, int panelW, int panelH) {
+		if (v.equals(remoteView) && st == style && ppb == this.ppb && panelW == this.panelW && panelH == this.panelH) {
+			return false;
+		}
+		remoteView = v;
+		this.style = st;
+		this.ppb = ppb;
+		this.panelW = panelW;
+		this.panelH = panelH;
+		// an own layout must not reuse these keys after the panel turns remote (and back)
+		logSeq = Long.MIN_VALUE;
+		agentSeq = Long.MIN_VALUE;
+		Font font = Minecraft.getInstance().font;
+		geometry(font);
+		rows = List.of();
+		newestKey = 0;
+		shiftFrom = 0;
+		headerRemote(font, v, st);
+		background();
+		return true;
+	}
+
+	private void headerRemote(Font font, RemoteMonitorView v, ScreenStyle st) {
+		name = null;
+		activity = null;
+		pill = null;
+		footer = null;
+		caret = false;
+		centre.clear();
+		centreColors.clear();
+		centreX.clear();
+		float y = by0 + padTop;
+		int w = (int) (cx1 - cx0);
+		switch (v.kind()) {
+			case NO_STUDIO -> {
+				mode = Mode.CONNECTING;
+				dotFamily = "idle";
+				headerBottom = y;
+				addCentre(font, DisplayText.WAITING_STUDIO, st.muted());
+			}
+			case NO_AGENT -> {
+				mode = Mode.NO_AGENT;
+				dotFamily = "idle";
+				nameColor = st.text();
+				String n = v.binding().isEmpty() ? "Monitor" : v.binding();
+				name = LogRows.seq(TextUtil.ellipsize(font, n, w - 10));
+				headerBottom = y + 10;
+				addCentre(font, "Not on the team", st.text());
+				addCentre(font, "public view", st.muted());
+			}
+			case AGENT -> {
+				mode = v.active() ? Mode.LIVE : Mode.OFF_SHIFT;
+				nameColor = st.name(v.agentId());
+				dotFamily = v.family();
+				String n = v.name() == null ? v.binding() : v.name();
+				String badge = v.state() == null ? "idle" : v.state().wire();
+				int badgeW = font.width(badge);
+				name = LogRows.seq(TextUtil.ellipsize(font, n, w - 10 - badgeW - 6));
+				pill = LogRows.seq(badge);
+				pillColor = UiStyle.status(v.family());
+				pillX = cx1 - badgeW;
+				String act = v.activity() != null ? LogRows.plainProse(v.activity()) : DisplayText.ACTIVITY_HIDDEN;
+				remoteActivity(font, w, y, act);
+				caret = mode == Mode.LIVE && (v.family().equals("working") || v.family().equals("thinking"));
+				if (v.paused()) {
+					footer = LogRows.seq("Paused");
+					footerColor = st.muted();
+				}
+				if (mode == Mode.OFF_SHIFT) {
+					addCentre(font, "Off shift", st.text());
+					addCentre(font, "public view", st.muted());
+				}
+			}
+			case FEED -> {
+				mode = Mode.FEED;
+				nameColor = st.text();
+				boolean noGoal = v.goalStatus() == null || v.goalStatus() == GoalStatusWire.NONE;
+				dotFamily = noGoal ? "idle" : "working";
+				name = LogRows.seq(TextUtil.ellipsize(font, "Team activity", w - 30));
+				String p = Math.round(v.goalProgress() * 100) + "%";
+				pill = LogRows.seq(p);
+				pillColor = st.muted();
+				pillX = cx1 - font.width(p);
+				String goal = noGoal ? "no goal" : v.goalStatus().wire();
+				String act = v.goalText() != null ? LogRows.plainProse(v.goalText()) : goal;
+				remoteActivity(font, w, y, act);
+				Counts c = v.counts();
+				if (c != null) {
+					List<LogRows.Row> out = new ArrayList<>(3);
+					out.add(LogRows.plain(TextUtil.ellipsize(font, "Todo " + c.todo() + "  Doing " + c.doing() + "  Review " + c.review(), w), st.text()));
+					out.add(LogRows.plain(TextUtil.ellipsize(font, "Done " + c.done() + "  Blocked " + c.blocked(), w), st.muted()));
+					out.add(LogRows.plain(TextUtil.ellipsize(font, "goal " + goal, w), st.text()));
+					rows = out;
+				}
+			}
+		}
+		cy0 = headerBottom + 3;
+		cy1 = by1 - PAD_BOTTOM - (caret || footer != null ? LogRows.LINE : 0);
+	}
+
+	private void remoteActivity(Font font, int w, float y, String act) {
+		if (act == null || act.isEmpty()) {
+			activity = null;
+			headerBottom = y + 10;
+			return;
+		}
+		activity = LogRows.seq(TextUtil.ellipsize(font, act, w));
+		activityX = cx0;
+		activityY = y + LogRows.LINE;
+		headerBottom = y + LogRows.LINE + 10;
 	}
 
 	private void geometry(Font font) {

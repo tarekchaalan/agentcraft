@@ -12,9 +12,19 @@ import dev.agentcraft.block.PanelBlock;
 import dev.agentcraft.block.StatusLampBlock;
 import dev.agentcraft.layout.AnchorNames;
 import dev.agentcraft.layout.Anchors;
+import dev.agentcraft.mp.MpEvents;
+import dev.agentcraft.mp.MpLog;
+import dev.agentcraft.mp.MpReasons;
+import dev.agentcraft.mp.Plot;
+import dev.agentcraft.mp.Plots;
+import dev.agentcraft.mp.StudioId;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.DyeColor;
@@ -159,7 +169,29 @@ public final class StudioHqBuilder implements HqBuilder {
 	@Override
 	public @Nullable String build(ServerLevel level, Anchors.Builder a, Options options) {
 		long t0 = System.nanoTime();
-		Plan p = new Plan(SITE[0], SITE[1], SITE[2], SITE[3], SITE[4], SITE[5], GROUND, y -> y > GROUND ? AIR
+		StudioId studio = options.studio();
+		Optional<Plot> plot = Plots.directory().plotOf(studio);
+		String refusal = refusalReason(studio, options.origin(), plot);
+		if (refusal != null) {
+			logPlotBuildFailed(studio, plot, refusal);
+			throw new IllegalArgumentException("studio build refused: " + refusal);
+		}
+		try {
+			return buildBody(level, a, options, plot, t0);
+		} catch (UncheckedIOException e) {
+			logPlotBuildFailed(studio, plot, MpReasons.IO_ERROR);
+			throw e;
+		} catch (RuntimeException e) {
+			logPlotBuildFailed(studio, plot, MpReasons.BUILD_ERROR);
+			throw e;
+		}
+	}
+
+	private @Nullable String buildBody(ServerLevel level, Anchors.Builder a, Options options, Optional<Plot> plot, long t0) {
+		BlockPos origin = options.origin();
+		StudioId studio = options.studio();
+		a.origin(origin);
+		Plan p = new Plan(SITE[0], SITE[1], SITE[2], SITE[3], SITE[4], SITE[5], origin, GROUND, y -> y > GROUND ? AIR
 			: y == GROUND ? Blocks.GRASS_BLOCK.defaultBlockState() : y >= GROUND - 3 ? Blocks.DIRT.defaultBlockState() : Blocks.STONE.defaultBlockState());
 		long tPlan0 = System.nanoTime();
 		HqLandscape.ground(p);
@@ -179,9 +211,17 @@ public final class StudioHqBuilder implements HqBuilder {
 		cameras(a);
 		p.settleGrass();
 		long tPlan = System.nanoTime() - tPlan0;
-		BlockState[] previous = PlanStore.load(level.getServer(), ID, SITE, p.size());
+		BlockState[] previous = PlanStore.load(level.getServer(), studio, ID, SITE, p.size());
 		Plan.Stats st = p.apply(level, previous, options.force());
-		PlanStore.save(level.getServer(), ID, SITE, p.cells());
+		try {
+			PlanStore.save(level.getServer(), studio, ID, SITE, p.cells());
+		} catch (IOException e) {
+			if (studio.equals(StudioId.LOCAL)) {
+				AgentCraft.LOGGER.warn("Could not save HQ plan for LOCAL", e);
+			} else {
+				throw new UncheckedIOException(e);
+			}
+		}
 		a.bounds(-HX + 1, FLOOR, HZN + 1, HX - 1, FLOOR + 16, AZ + 8);
 		a.spot(AnchorNames.ENTRANCE, AX, FEET, AZ + 7, 180);
 		a.put(AnchorNames.SPAWN, AX + 0.5, FEET, AZ + 7.5, 180, 0);
@@ -207,7 +247,40 @@ public final class StudioHqBuilder implements HqBuilder {
 		if (st.items() > 0) {
 			r.append(String.format(Locale.ROOT, "; removed %d dropped item%s", st.items(), st.items() == 1 ? "" : "s"));
 		}
+		if (!studio.equals(StudioId.LOCAL)) {
+			MpLog.event(MpEvents.PLOT_BUILT, "studio", studio.owner(), "plot", plot.orElseThrow().index(), "ms", (System.nanoTime() - t0) / 1_000_000,
+				"changed", st.changed() + st.connected(), "kept", st.kept());
+		}
 		return r.toString();
+	}
+
+	/**
+	 * Refusal reason, or null when the build may proceed. {@link StudioId#LOCAL} is only accepted at
+	 * {@link BlockPos#ZERO}: the LOCAL plan file stores no origin, so another origin would reuse plot 0's
+	 * history and treat every cell as player-kept.
+	 */
+	private static @Nullable String refusalReason(StudioId studio, BlockPos origin, Optional<Plot> plot) {
+		if ((origin.getX() & 15) != 0 || (origin.getZ() & 15) != 0) {
+			return MpReasons.BAD_ORIGIN;
+		}
+		if (studio.equals(StudioId.LOCAL)) {
+			return origin.equals(BlockPos.ZERO) ? null : MpReasons.BAD_ORIGIN;
+		}
+		if (plot.isEmpty()) {
+			return MpReasons.NO_PLOT;
+		}
+		return plot.get().origin().equals(origin) ? null : MpReasons.BAD_ORIGIN;
+	}
+
+	private static void logPlotBuildFailed(StudioId studio, Optional<Plot> plot, String reason) {
+		if (studio.equals(StudioId.LOCAL)) {
+			return;
+		}
+		if (plot.isPresent()) {
+			MpLog.event(MpEvents.PLOT_BUILD_FAILED, "studio", studio.owner(), "plot", plot.get().index(), "reason", reason);
+		} else {
+			MpLog.event(MpEvents.PLOT_BUILD_FAILED, "studio", studio.owner(), "reason", reason);
+		}
 	}
 
 	/** Desk bay owners, west to east (see {@link #DESK_ORDER}). */

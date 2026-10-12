@@ -12,6 +12,8 @@ import dev.agentcraft.client.foreman.Protocol.Agent;
 import dev.agentcraft.client.foreman.Protocol.FeedItem;
 import dev.agentcraft.client.hud.Keys;
 import dev.agentcraft.client.hud.UiBits;
+import dev.agentcraft.client.mp.StudioView;
+import dev.agentcraft.client.mp.Studios;
 import dev.agentcraft.client.ui.Kit;
 import dev.agentcraft.client.ui.TextUtil;
 import dev.agentcraft.client.ui.UiStyle;
@@ -20,6 +22,7 @@ import dev.agentcraft.client.world.StationRenderState;
 import dev.agentcraft.client.world.StationRenderer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.SubmitNodeCollector;
@@ -67,8 +70,22 @@ public class ConsoleTerminalRenderer extends StationRenderer<ConsoleTerminalBloc
 		public int waiting;
 		public boolean stale;
 		public boolean live;
+		/** Remote studios show an idle visitor screen: no news card and no typing prompt. */
+		public boolean remote;
 		public String key = "Enter";
 		public String decisionsKey = "J";
+	}
+
+	/**
+	 * The visitor look of the terminal: always idle, with no viewer draft and no local waiting count.
+	 * It never reads {@link ConsoleLog} or {@link DecisionsFeature}.
+	 */
+	public record RemoteConsole(boolean online, int waiting, boolean idle) {
+	}
+
+	/** The remote model for a studio ({@code view} carries the owner's online flag). */
+	public static RemoteConsole remoteConsole(StudioView view) {
+		return new RemoteConsole(view.online(), 0, true);
 	}
 
 	@Override
@@ -96,6 +113,11 @@ public class ConsoleTerminalRenderer extends StationRenderer<ConsoleTerminalBloc
 
 	@Override
 	protected void extractStation(ConsoleTerminalBlockEntity be, State s, float partialTicks) {
+		Optional<StudioView> maybe = Studios.at(be.getBlockPos());
+		if (maybe.isPresent() && !maybe.get().own()) {
+			extractRemote(s, maybe.get());
+			return;
+		}
 		ForemanState st = Foreman.state();
 		s.live = st != null && st.hasData();
 		s.stale = st == null || st.isStale();
@@ -132,6 +154,22 @@ public class ConsoleTerminalRenderer extends StationRenderer<ConsoleTerminalBloc
 			cachedDraft = draft.isEmpty() ? "" : TextUtil.ellipsize(font, draft.replace('\n', ' '), SW - 12 - 6);
 		}
 		s.draft = cachedDraft;
+	}
+
+	/**
+	 * The visitor screen for a remote studio: idle, no feed card and no draft. It never touches the
+	 * viewer's {@link ConsoleLog} or {@link DecisionsFeature} waiting count.
+	 */
+	private static void extractRemote(State s, StudioView view) {
+		RemoteConsole m = remoteConsole(view);
+		s.live = true;
+		s.stale = !m.online();
+		s.waiting = m.waiting();
+		s.card = null;
+		s.page = 0;
+		s.pages = 0;
+		s.draft = "";
+		s.remote = true;
 	}
 
 	/** The newest feed items (oldest of them first), laid out for the card. */
@@ -301,20 +339,22 @@ public class ConsoleTerminalRenderer extends StationRenderer<ConsoleTerminalBloc
 			}
 		}
 
-		// prompt: your draft, or how to start typing here
-		float py = SH - 10;
-		WorldUi.submitText(poseStack, collector, ">", 4, py, UiStyle.color("monitor.tool", 0xFF624E16), light);
-		float cx = 12;
-		if (!s.draft.isEmpty()) {
-			WorldUi.submitText(poseStack, collector, s.draft, cx, py, ink, light);
-			cx += font.width(s.draft) + 1;
-		} else {
-			String hint = s.key + " to type";
-			WorldUi.submitText(poseStack, collector, hint, cx, py, muted, light);
-			cx += font.width(hint) + 2;
-		}
-		if ((int) (s.timeSeconds * 2) % 2 == 0) {
-			WorldUi.submitFill(poseStack, collector, cx, py - 1, cx + 1, py + 8, ink, light);
+		// prompt: your draft, or how to start typing here (a visitor cannot type into a remote terminal)
+		if (!s.remote) {
+			float py = SH - 10;
+			WorldUi.submitText(poseStack, collector, ">", 4, py, UiStyle.color("monitor.tool", 0xFF624E16), light);
+			float cx = 12;
+			if (!s.draft.isEmpty()) {
+				WorldUi.submitText(poseStack, collector, s.draft, cx, py, ink, light);
+				cx += font.width(s.draft) + 1;
+			} else {
+				String hint = s.key + " to type";
+				WorldUi.submitText(poseStack, collector, hint, cx, py, muted, light);
+				cx += font.width(hint) + 2;
+			}
+			if ((int) (s.timeSeconds * 2) % 2 == 0) {
+				WorldUi.submitFill(poseStack, collector, cx, py - 1, cx + 1, py + 8, ink, light);
+			}
 		}
 		poseStack.popPose();
 	}

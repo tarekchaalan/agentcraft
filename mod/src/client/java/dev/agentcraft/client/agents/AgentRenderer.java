@@ -69,7 +69,7 @@ public class AgentRenderer extends AvatarRenderer<ClientAgentEntity> {
 		}
 		s.renderer = this;
 		AgentView v = entity.view();
-		s.agentId = v.id;
+		s.agentId = v.plateKey;
 		s.pose = v.pose;
 		s.atMonitor = v.pose == AgentPose.SIT && ("desk".equals(v.station) || "terminal".equals(v.station));
 		s.timeSeconds = (entity.tickCount + partialTicks) / 20f;

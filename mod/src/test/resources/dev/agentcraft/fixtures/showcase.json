@@ -1,0 +1,1283 @@
+{
+ "v": 1,
+ "type": "snapshot",
+ "foreman": {
+  "version": "0.1.0",
+  "backend": "sim",
+  "auth": "ok",
+  "userName": "Alex",
+  "message": "Showcase (static)",
+  "speed": 1,
+  "showcase": true
+ },
+ "agents": [
+  {
+   "id": "marlow",
+   "name": "Marlow",
+   "role": "lead",
+   "title": "Foreman & architect",
+   "color": "#3D4580",
+   "skin": "marlow",
+   "state": "waiting_user",
+   "activity": "asking you about `notes tags`",
+   "station": "user",
+   "paused": false,
+   "active": true,
+   "accent": "#E9E5DE"
+  },
+  {
+   "id": "juniper",
+   "name": "Juniper",
+   "role": "worker",
+   "title": "Researcher",
+   "color": "#8E66BF",
+   "skin": "juniper",
+   "state": "editing",
+   "activity": "editing src/cli.ts",
+   "station": "desk",
+   "paused": false,
+   "active": true,
+   "accent": "#F4EFE6",
+   "taskId": "t3",
+   "repoId": "sim-demo-fixture-busy",
+   "worktree": "juniper-t3"
+  },
+  {
+   "id": "kit",
+   "name": "Kit",
+   "role": "worker",
+   "title": "Builder & tester",
+   "color": "#3C74B3",
+   "skin": "kit",
+   "state": "testing",
+   "activity": "2 failing",
+   "station": "testbench",
+   "paused": false,
+   "active": true,
+   "accent": "#F4EFE6",
+   "repoId": "sim-demo-fixture-busy",
+   "taskId": "t5",
+   "worktree": "kit-t5"
+  },
+  {
+   "id": "wren",
+   "name": "Wren",
+   "role": "worker",
+   "title": "Interface designer",
+   "color": "#E0A2BF",
+   "skin": "wren",
+   "state": "idle",
+   "activity": "t4 awaiting your merge",
+   "station": "lounge",
+   "paused": false,
+   "active": true,
+   "accent": "#1F1E1D",
+   "taskId": "t4",
+   "repoId": "sim-demo-fixture-busy",
+   "worktree": "wren-t4"
+  },
+  {
+   "id": "rowan",
+   "name": "Rowan",
+   "role": "worker",
+   "title": "Refactorer & reviewer",
+   "color": "#802F6E",
+   "skin": "rowan",
+   "state": "reading",
+   "activity": "reading src/notes.ts",
+   "station": "library",
+   "paused": false,
+   "active": true,
+   "accent": "#634733"
+  },
+  {
+   "id": "tove",
+   "name": "Tove",
+   "role": "worker",
+   "title": "Archivist & QA",
+   "color": "#98B2E2",
+   "skin": "tove",
+   "state": "thinking",
+   "activity": "outlining the Tags docs",
+   "station": "desk",
+   "paused": false,
+   "active": true,
+   "accent": "#F4EFE6"
+  }
+ ],
+ "tasks": [
+  {
+   "id": "t1",
+   "title": "Explore repo & draft plan",
+   "status": "done",
+   "deps": [],
+   "priority": 0,
+   "ci": "unknown",
+   "createdBy": "marlow",
+   "createdAt": 1791093296524,
+   "updatedAt": 1791093296544,
+   "assignee": "marlow",
+   "repoId": "sim-demo-fixture-busy",
+   "goalId": "g1",
+   "summary": "Plan written to shared memory (Plan: #tags for pocket-notes)."
+  },
+  {
+   "id": "t2",
+   "title": "Tag parser module (src/tags.ts)",
+   "status": "done",
+   "deps": [
+    "t1"
+   ],
+   "priority": 2,
+   "ci": "pass",
+   "createdBy": "marlow",
+   "createdAt": 1791093296524,
+   "updatedAt": 1791093298194,
+   "description": "parseTags/hasTag/normalizeTag: lowercase, de-duplicated, \"-\" and \"_\" allowed, \"issue#12\" is not a tag. Unit tests.",
+   "assignee": "kit",
+   "repoId": "sim-demo-fixture-busy",
+   "goalId": "g1",
+   "branch": "agentcraft/kit/t2-tag-parser-module",
+   "worktree": "kit-t2",
+   "summary": "src/tags.ts: parseTags/hasTag/normalizeTag + 5 tests. Hyphens ok, \"issue#12\" ignored, case-insensitive."
+  },
+  {
+   "id": "t3",
+   "title": "`notes list --tag` + `notes tags`",
+   "status": "doing",
+   "deps": [
+    "t2"
+   ],
+   "priority": 1,
+   "ci": "unknown",
+   "createdBy": "marlow",
+   "createdAt": 1791093296525,
+   "updatedAt": 1791093298278,
+   "description": "Filter list by tag; new `tags` command with usage counts. Uses src/tags.ts.",
+   "assignee": "juniper",
+   "repoId": "sim-demo-fixture-busy",
+   "goalId": "g1",
+   "branch": "agentcraft/juniper/t3-notes-list-tag-notes",
+   "worktree": "juniper-t3"
+  },
+  {
+   "id": "t4",
+   "title": "Highlight #tags in list output",
+   "status": "review",
+   "deps": [
+    "t1"
+   ],
+   "priority": 1,
+   "ci": "pass",
+   "createdBy": "marlow",
+   "createdAt": 1791093296526,
+   "updatedAt": 1791093297977,
+   "description": "Cyan tags when printing to a terminal; formatNote/formatList take {color}. No new dependencies.",
+   "assignee": "wren",
+   "repoId": "sim-demo-fixture-busy",
+   "goalId": "g1",
+   "branch": "agentcraft/wren/t4-highlight-tags-in-list",
+   "worktree": "wren-t4",
+   "summary": "highlightTags() + {color} option on formatNote/formatList; test added. Plain ANSI, no deps."
+  },
+  {
+   "id": "t5",
+   "title": "Tag edge cases: unicode & punctuation",
+   "status": "doing",
+   "deps": [
+    "t2"
+   ],
+   "priority": 0,
+   "ci": "fail",
+   "createdBy": "marlow",
+   "createdAt": 1791093296528,
+   "updatedAt": 1791093298694,
+   "description": "Tests + fixes for #café, #crème-brûlée, trailing punctuation.",
+   "assignee": "kit",
+   "repoId": "sim-demo-fixture-busy",
+   "goalId": "g1",
+   "branch": "agentcraft/kit/t5-tag-edge-cases-unicode",
+   "worktree": "kit-t5"
+  },
+  {
+   "id": "t6",
+   "title": "README + help text for tags",
+   "status": "todo",
+   "deps": [
+    "t3",
+    "t4"
+   ],
+   "priority": 0,
+   "ci": "unknown",
+   "createdBy": "marlow",
+   "createdAt": 1791093296529,
+   "updatedAt": 1791093296529,
+   "description": "Document tags; update `notes help`; enable colors on a TTY.",
+   "assignee": "tove",
+   "repoId": "sim-demo-fixture-busy",
+   "goalId": "g1"
+  },
+  {
+   "id": "t7",
+   "title": "Publish 0.3.0 to npm",
+   "status": "blocked",
+   "deps": [
+    "t6"
+   ],
+   "priority": -1,
+   "ci": "unknown",
+   "createdBy": "marlow",
+   "createdAt": 1791093296530,
+   "updatedAt": 1791093296530,
+   "description": "Needs Alex: agents never publish or push.",
+   "repoId": "sim-demo-fixture-busy",
+   "goalId": "g1",
+   "blockedReason": "needs Alex's npm credentials - agents never publish"
+  },
+  {
+   "id": "t8",
+   "title": "QA: full test run + CLI smoke on main",
+   "status": "todo",
+   "deps": [
+    "t5",
+    "t6"
+   ],
+   "priority": 0,
+   "ci": "unknown",
+   "createdBy": "marlow",
+   "createdAt": 1791093296532,
+   "updatedAt": 1791093296532,
+   "description": "After merges: npm test on main, smoke the CLI with tagged notes, draft release notes.",
+   "assignee": "tove",
+   "repoId": "sim-demo-fixture-busy",
+   "goalId": "g1"
+  },
+  {
+   "id": "t9",
+   "title": "Stretch: shell completion for #tags",
+   "status": "todo",
+   "deps": [
+    "t3"
+   ],
+   "priority": -2,
+   "ci": "unknown",
+   "createdBy": "marlow",
+   "createdAt": 1791093296533,
+   "updatedAt": 1791093296533,
+   "assignee": "rowan",
+   "repoId": "sim-demo-fixture-busy",
+   "goalId": "g1"
+  }
+ ],
+ "decisions": [
+  {
+   "id": "d1",
+   "agentId": "wren",
+   "kind": "permission",
+   "question": "Wren wants to run `npm install chalk@5` (network access, adds a dependency).",
+   "options": [
+    "Allow once",
+    "Always allow for this agent",
+    "Deny"
+   ],
+   "status": "answered",
+   "createdAt": 1791093296745,
+   "context": "Bash: npm install chalk@5\ncwd: /srv/agentcraft/fixture-busy/worktrees/sim-demo-fixture-busy/wren-t4\nreason: package install downloads from the network and changes package.json",
+   "taskId": "t4",
+   "tool": "Bash",
+   "answer": {
+    "ts": 1791093297028,
+    "option": "Allow once"
+   }
+  },
+  {
+   "id": "d2",
+   "agentId": "marlow",
+   "kind": "merge",
+   "question": "Merge t2 \"Tag parser module (src/tags.ts)\" (agentcraft/kit/t2-tag-parser-module) into main?",
+   "options": [
+    "Merge",
+    "Request changes",
+    "Reject"
+   ],
+   "status": "answered",
+   "createdAt": 1791093297552,
+   "context": "src/tags.ts: parseTags/hasTag/normalizeTag + 5 tests. Hyphens ok, \"issue#12\" ignored, case-insensitive.\n2 files, +45 -0 | tests: pass\nReviewed by Rowan: kit-t2 reads well: tests first, regex anchored. Nit for later: export the pattern so format.ts can reuse it.",
+   "taskId": "t2",
+   "repoId": "sim-demo-fixture-busy",
+   "worktree": "kit-t2",
+   "answer": {
+    "ts": 1791093297979,
+    "option": "Merge"
+   }
+  },
+  {
+   "id": "d3",
+   "agentId": "marlow",
+   "kind": "merge",
+   "question": "Merge t4 \"Highlight #tags in list output\" (agentcraft/wren/t4-highlight-tags-in-list) into main?",
+   "options": [
+    "Merge",
+    "Request changes",
+    "Reject"
+   ],
+   "status": "open",
+   "createdAt": 1791093298437,
+   "context": "highlightTags() + {color} option on formatNote/formatList; test added. Plain ANSI, no deps.\n2 files, +26 -5 | tests: pass\nReviewed by Rowan: wren-t4: small and clean, color is opt-in so tests stay deterministic.",
+   "taskId": "t4",
+   "repoId": "sim-demo-fixture-busy",
+   "worktree": "wren-t4"
+  },
+  {
+   "id": "d4",
+   "agentId": "marlow",
+   "kind": "question",
+   "question": "Should `notes tags` count tags on completed notes too?",
+   "options": [
+    "Only open notes (recommended)",
+    "Include completed notes"
+   ],
+   "status": "open",
+   "createdAt": 1791093298439,
+   "context": "Juniper is building the `tags` command now. Open-only matches what `notes list` shows by default; `--all` could include done notes.",
+   "taskId": "t3"
+  }
+ ],
+ "repos": [
+  {
+   "id": "sim-demo-fixture-busy",
+   "name": "sim-demo-fixture-busy",
+   "path": "/srv/demo-app",
+   "branch": "main",
+   "dirty": false,
+   "worktrees": [
+    {
+     "id": "kit-t2",
+     "agentId": "kit",
+     "taskId": "t2",
+     "branch": "agentcraft/kit/t2-tag-parser-module",
+     "base": "main",
+     "path": "/srv/agentcraft/fixture-busy/worktrees/sim-demo-fixture-busy/kit-t2",
+     "status": "merged",
+     "ahead": 1,
+     "files": 2,
+     "additions": 45,
+     "deletions": 0
+    },
+    {
+     "id": "wren-t4",
+     "agentId": "wren",
+     "taskId": "t4",
+     "branch": "agentcraft/wren/t4-highlight-tags-in-list",
+     "base": "main",
+     "path": "/srv/agentcraft/fixture-busy/worktrees/sim-demo-fixture-busy/wren-t4",
+     "status": "active",
+     "ahead": 1,
+     "files": 2,
+     "additions": 26,
+     "deletions": 5
+    },
+    {
+     "id": "juniper-t3",
+     "agentId": "juniper",
+     "taskId": "t3",
+     "branch": "agentcraft/juniper/t3-notes-list-tag-notes",
+     "base": "main",
+     "path": "/srv/agentcraft/fixture-busy/worktrees/sim-demo-fixture-busy/juniper-t3",
+     "status": "active",
+     "ahead": 0,
+     "files": 0,
+     "additions": 0,
+     "deletions": 0
+    },
+    {
+     "id": "kit-t5",
+     "agentId": "kit",
+     "taskId": "t5",
+     "branch": "agentcraft/kit/t5-tag-edge-cases-unicode",
+     "base": "main",
+     "path": "/srv/agentcraft/fixture-busy/worktrees/sim-demo-fixture-busy/kit-t5",
+     "status": "active",
+     "ahead": 0,
+     "files": 0,
+     "additions": 0,
+     "deletions": 0
+    }
+   ],
+   "ci": "fail",
+   "head": "1798aeb"
+  }
+ ],
+ "memory": [
+  {
+   "id": "shared/plan",
+   "scope": "shared",
+   "title": "Plan: #tags for pocket-notes",
+   "body": "# Plan: #tags for pocket-notes\n\n**Goal:** Add #tags to pocket-notes: parse them, filter with `notes list --tag`, and show a `notes tags` summary\n\n## Approach\n- Tags live in the note text (`#work`), so no storage migration: derive them on read.\n- One parser (`src/tags.ts`) used everywhere: lowercase, de-duplicated, `-`/`_` allowed, `issue#12` is not a tag.\n- CLI: `notes list --tag <t>` filter + `notes tags` summary.\n- Output: tags in cyan when stdout is a terminal (respect NO_COLOR).\n\n## Tasks\n- t1 Explore repo & draft plan - Marlow\n- t2 Tag parser module - Kit\n- t3 `list --tag` + `tags` command - Juniper (after t2)\n- t4 Highlight tags in output - Wren\n- t5 Unicode & punctuation edge cases - Kit (after t2)\n- t6 README + help text - Tove (after t3, t4)\n- t7 Publish to npm - **blocked: needs Alex**\n- t8 QA on main - Tove (after t5, t6)\n- t9 Stretch: shell completion - Rowan\n\n## Review\nRowan reviews every branch; then it goes to Alex as a merge decision. Nothing merges without Alex.\n",
+   "updated": 1791093296535,
+   "author": "marlow"
+  },
+  {
+   "id": "shared/conventions",
+   "scope": "shared",
+   "title": "Repo conventions",
+   "body": "# Repo conventions (pocket-notes)\n\n- Node >= 22.18 runs the TypeScript sources directly (type stripping): no build step.\n- Tests: `npm test` (node:test), files in `test/*.test.ts`. Keep the suite green before review.\n- Zero runtime dependencies - keep it that way.\n- Pure functions in `src/notes.ts`; I/O only in `src/cli.ts` and `src/store.ts`.\n",
+   "updated": 1791093296540,
+   "author": "marlow"
+  },
+  {
+   "id": "shared/decisions",
+   "scope": "shared",
+   "title": "Decisions",
+   "body": "# Decisions\n\n- Tag colors use plain ANSI escapes, no chalk (install allowed, not needed).",
+   "updated": 1791093297028,
+   "author": "wren"
+  },
+  {
+   "id": "kit/regex-notes",
+   "scope": "kit",
+   "title": "Regex notes",
+   "body": "# Regex notes\n\n- `/#(\\w+)/` splits #to-do and matches issue#12. Use `(?:^|\\s)#(\\w[\\w-]*)`.\n- Unicode letters (#café) still need a look in t5.",
+   "updated": 1791093297056,
+   "author": "kit"
+  }
+ ],
+ "goal": {
+  "id": "g1",
+  "text": "Add #tags to pocket-notes: parse them, filter with `notes list --tag`, and show a `notes tags` summary",
+  "progress": 0.394,
+  "status": "active",
+  "createdAt": 1791093296232,
+  "updatedAt": 1791093298364,
+  "repoId": "sim-demo-fixture-busy"
+ },
+ "goals": [
+  {
+   "id": "g1",
+   "text": "Add #tags to pocket-notes: parse them, filter with `notes list --tag`, and show a `notes tags` summary",
+   "progress": 0.394,
+   "status": "active",
+   "createdAt": 1791093296232,
+   "updatedAt": 1791093298364,
+   "repoId": "sim-demo-fixture-busy"
+  }
+ ],
+ "feed": [
+  {
+   "ts": 1791093296232,
+   "kind": "goal",
+   "text": "New goal: Add #tags to pocket-notes: parse them, filter with `notes list --tag`, and show a `notes tags` summary",
+   "agentId": "user"
+  },
+  {
+   "ts": 1791093296235,
+   "kind": "message",
+   "text": "Morning, team. New goal from Alex: Add #tags to pocket-notes: parse them, filter with `notes list --tag`, and show a `notes tags` summary. Give me a minute with the repo.",
+   "agentId": "marlow",
+   "to": "all"
+  },
+  {
+   "ts": 1791093296520,
+   "kind": "ci",
+   "text": "Marlow: tests pass",
+   "agentId": "marlow"
+  },
+  {
+   "ts": 1791093296539,
+   "kind": "memory",
+   "text": "Marlow wrote memory: Plan: #tags for pocket-notes",
+   "agentId": "marlow"
+  },
+  {
+   "ts": 1791093296544,
+   "kind": "memory",
+   "text": "Marlow wrote memory: Repo conventions",
+   "agentId": "marlow"
+  },
+  {
+   "ts": 1791093296544,
+   "kind": "plan",
+   "text": "Marlow planned Add #tags to pocket-notes: parse them, filter with `notes li... into 9 tasks",
+   "agentId": "marlow"
+  },
+  {
+   "ts": 1791093296545,
+   "kind": "message",
+   "text": "Plan is in shared memory. Kit: tag parser first (t2). Wren: tag highlighting (t4). Juniper: the CLI once Kit's parser lands. Tove: docs + QA. Rowan: reviews every branch.",
+   "agentId": "marlow",
+   "to": "all"
+  },
+  {
+   "ts": 1791093296635,
+   "kind": "task",
+   "text": "Kit started t2: Tag parser module (src/tags.ts)",
+   "agentId": "kit"
+  },
+  {
+   "ts": 1791093296717,
+   "kind": "task",
+   "text": "Wren started t4: Highlight #tags in list output",
+   "agentId": "wren"
+  },
+  {
+   "ts": 1791093296745,
+   "kind": "decision",
+   "text": "Wren needs you (permission): Wren wants to run `npm install chalk@5` (network access, adds a dependency).",
+   "agentId": "wren",
+   "to": "user"
+  },
+  {
+   "ts": 1791093297024,
+   "kind": "ci",
+   "text": "Kit: tests fail on t2",
+   "agentId": "kit"
+  },
+  {
+   "ts": 1791093297025,
+   "kind": "message",
+   "text": "Hyphens and mid-word #s trip my first regex (3 red). Fixing.",
+   "agentId": "kit",
+   "to": "all"
+  },
+  {
+   "ts": 1791093297028,
+   "kind": "decision",
+   "text": "Alex answered Wren: Allow once",
+   "agentId": "user",
+   "to": "wren"
+  },
+  {
+   "ts": 1791093297033,
+   "kind": "memory",
+   "text": "Wren wrote memory: Decisions",
+   "agentId": "wren"
+  },
+  {
+   "ts": 1791093297059,
+   "kind": "memory",
+   "text": "Kit wrote memory: Regex notes",
+   "agentId": "kit"
+  },
+  {
+   "ts": 1791093297328,
+   "kind": "ci",
+   "text": "Kit: tests pass on t2",
+   "agentId": "kit"
+  },
+  {
+   "ts": 1791093297491,
+   "kind": "task",
+   "text": "Kit finished t2 -> review",
+   "agentId": "kit"
+  },
+  {
+   "ts": 1791093297491,
+   "kind": "message",
+   "text": "parseTags() and hasTag() are in src/tags.ts: lowercase + de-duplicated. You are unblocked as soon as it merges.",
+   "agentId": "kit",
+   "to": "juniper"
+  },
+  {
+   "ts": 1791093297492,
+   "kind": "message",
+   "text": "Perfect - I'll build `list --tag` on hasTag() and `tags` on parseTags().",
+   "agentId": "juniper",
+   "to": "kit"
+  },
+  {
+   "ts": 1791093297549,
+   "kind": "message",
+   "text": "kit-t2 reads well: tests first, regex anchored. Nit for later: export the pattern so format.ts can reuse it.",
+   "agentId": "rowan",
+   "to": "marlow"
+  },
+  {
+   "ts": 1791093297552,
+   "kind": "decision",
+   "text": "Marlow needs you (merge review): Merge t2 \"Tag parser module (src/tags.ts)\" (agentcraft/kit/t2-tag-parser-module) into main?",
+   "agentId": "marlow",
+   "to": "user"
+  },
+  {
+   "ts": 1791093297813,
+   "kind": "ci",
+   "text": "Wren: tests pass on t4",
+   "agentId": "wren"
+  },
+  {
+   "ts": 1791093297977,
+   "kind": "task",
+   "text": "Wren finished t4 -> review",
+   "agentId": "wren"
+  },
+  {
+   "ts": 1791093297979,
+   "kind": "decision",
+   "text": "Alex answered Marlow: Merge",
+   "agentId": "user",
+   "to": "marlow"
+  },
+  {
+   "ts": 1791093298194,
+   "kind": "merge",
+   "text": "Merged agentcraft/kit/t2-tag-parser-module into main (1798aeb, 2 files)",
+   "agentId": "marlow"
+  },
+  {
+   "ts": 1791093298195,
+   "kind": "message",
+   "text": "Merged t2 into main. Nice work.",
+   "agentId": "marlow",
+   "to": "kit"
+  },
+  {
+   "ts": 1791093298196,
+   "kind": "task",
+   "text": "t3 and t5 are unblocked",
+   "agentId": "marlow"
+  },
+  {
+   "ts": 1791093298279,
+   "kind": "task",
+   "text": "Juniper started t3: `notes list --tag` + `notes tags`",
+   "agentId": "juniper"
+  },
+  {
+   "ts": 1791093298364,
+   "kind": "task",
+   "text": "Kit started t5: Tag edge cases: unicode & punctuation",
+   "agentId": "kit"
+  },
+  {
+   "ts": 1791093298434,
+   "kind": "message",
+   "text": "wren-t4: small and clean, color is opt-in so tests stay deterministic.",
+   "agentId": "rowan",
+   "to": "marlow"
+  },
+  {
+   "ts": 1791093298437,
+   "kind": "decision",
+   "text": "Marlow needs you (merge review): Merge t4 \"Highlight #tags in list output\" (agentcraft/wren/t4-highlight-tags-in-list) into main?",
+   "agentId": "marlow",
+   "to": "user"
+  },
+  {
+   "ts": 1791093298439,
+   "kind": "decision",
+   "text": "Marlow needs you (question): Should `notes tags` count tags on completed notes too?",
+   "agentId": "marlow",
+   "to": "user"
+  },
+  {
+   "ts": 1791093298695,
+   "kind": "ci",
+   "text": "Kit: tests fail on t5",
+   "agentId": "kit"
+  },
+  {
+   "ts": 1791093298696,
+   "kind": "message",
+   "text": "Unicode tags (#café) slip past \\w. Switching to \\p{L} with the u flag.",
+   "agentId": "kit",
+   "to": "all"
+  }
+ ],
+ "logs": [
+  {
+   "agentId": "marlow",
+   "entries": [
+    {
+     "ts": 1791093296233,
+     "kind": "text",
+     "text": "New goal from Alex: Add #tags to pocket-notes: parse them, filter with `notes list --tag`, and show a `notes tags` summary"
+    },
+    {
+     "ts": 1791093296236,
+     "kind": "tool",
+     "text": "Read README.md"
+    },
+    {
+     "ts": 1791093296238,
+     "kind": "result",
+     "text": "28 lines"
+    },
+    {
+     "ts": 1791093296239,
+     "kind": "tool",
+     "text": "Read package.json"
+    },
+    {
+     "ts": 1791093296241,
+     "kind": "result",
+     "text": "17 lines"
+    },
+    {
+     "ts": 1791093296242,
+     "kind": "tool",
+     "text": "Glob src/**/*.ts"
+    },
+    {
+     "ts": 1791093296244,
+     "kind": "result",
+     "text": "src/cli.ts\nsrc/format.ts\nsrc/notes.ts\nsrc/store.ts"
+    },
+    {
+     "ts": 1791093296245,
+     "kind": "tool",
+     "text": "Read src/cli.ts"
+    },
+    {
+     "ts": 1791093296246,
+     "kind": "result",
+     "text": "81 lines - exports Io, run"
+    },
+    {
+     "ts": 1791093296248,
+     "kind": "tool",
+     "text": "Read src/notes.ts"
+    },
+    {
+     "ts": 1791093296249,
+     "kind": "result",
+     "text": "38 lines - exports Note, ListOptions, nextId, addNote, completeNote"
+    },
+    {
+     "ts": 1791093296251,
+     "kind": "tool",
+     "text": "Grep \"^export function\""
+    },
+    {
+     "ts": 1791093296253,
+     "kind": "result",
+     "text": "12 matches in 4 files\nsrc/cli.ts:29: export function run(argv: string[], io: Io): number {\nsrc/format.ts:8: export function relativeTime(then: number, now = Date.now()): string {\nsrc/format.ts:16: export function formatNote(note: Note, now = Date.now()): string {\nsrc/format.ts:22: export function formatList(notes: readonly Note[], now = Date.now()): "
+    },
+    {
+     "ts": 1791093296254,
+     "kind": "tool",
+     "text": "Read test/cli.test.ts"
+    },
+    {
+     "ts": 1791093296255,
+     "kind": "result",
+     "text": "40 lines"
+    },
+    {
+     "ts": 1791093296257,
+     "kind": "tool",
+     "text": "$ npm test"
+    },
+    {
+     "ts": 1791093296519,
+     "kind": "result",
+     "text": "tests passed (0.3s)"
+    },
+    {
+     "ts": 1791093296521,
+     "kind": "text",
+     "text": "Baseline is green. No tag support anywhere yet; notes are plain text, so tags can be derived on read (no storage migration)."
+    },
+    {
+     "ts": 1791093296523,
+     "kind": "text",
+     "text": "Splitting the goal into tasks with dependencies"
+    },
+    {
+     "ts": 1791093296524,
+     "kind": "tool",
+     "text": "create_task \"Tag parser module (src/tags.ts)\""
+    },
+    {
+     "ts": 1791093296525,
+     "kind": "tool",
+     "text": "create_task \"`notes list --tag` + `notes tags`\""
+    },
+    {
+     "ts": 1791093296526,
+     "kind": "tool",
+     "text": "create_task \"Highlight #tags in list output\""
+    },
+    {
+     "ts": 1791093296528,
+     "kind": "tool",
+     "text": "create_task \"Tag edge cases: unicode & punctuation\""
+    },
+    {
+     "ts": 1791093296529,
+     "kind": "tool",
+     "text": "create_task \"README + help text for tags\""
+    },
+    {
+     "ts": 1791093296530,
+     "kind": "tool",
+     "text": "create_task \"Publish 0.3.0 to npm\" (blocked)"
+    },
+    {
+     "ts": 1791093296532,
+     "kind": "tool",
+     "text": "create_task \"QA: full test run + CLI smoke on main\""
+    },
+    {
+     "ts": 1791093296533,
+     "kind": "tool",
+     "text": "create_task \"Stretch: shell completion for #tags\""
+    },
+    {
+     "ts": 1791093296538,
+     "kind": "tool",
+     "text": "write_memory \"Plan: #tags for pocket-notes\""
+    },
+    {
+     "ts": 1791093296543,
+     "kind": "tool",
+     "text": "write_memory \"Repo conventions\""
+    },
+    {
+     "ts": 1791093297550,
+     "kind": "tool",
+     "text": "request_merge t2"
+    },
+    {
+     "ts": 1791093298436,
+     "kind": "tool",
+     "text": "request_merge t4"
+    },
+    {
+     "ts": 1791093298437,
+     "kind": "text",
+     "text": "Should `notes tags` count completed notes? That is a product call."
+    }
+   ]
+  },
+  {
+   "agentId": "juniper",
+   "entries": [
+    {
+     "ts": 1791093296723,
+     "kind": "tool",
+     "text": "Read src/cli.ts"
+    },
+    {
+     "ts": 1791093296724,
+     "kind": "result",
+     "text": "81 lines - exports Io, run"
+    },
+    {
+     "ts": 1791093296726,
+     "kind": "text",
+     "text": "Studying run()'s switch so --tag slots in cleanly once t2 lands."
+    },
+    {
+     "ts": 1791093298279,
+     "kind": "tool",
+     "text": "$ git worktree add -b agentcraft/juniper/t3-notes-list-tag-notes"
+    },
+    {
+     "ts": 1791093298279,
+     "kind": "result",
+     "text": "Preparing worktree (new branch 'agentcraft/juniper/t3-notes-list-tag-notes') from main"
+    },
+    {
+     "ts": 1791093298366,
+     "kind": "tool",
+     "text": "Read src/tags.ts"
+    },
+    {
+     "ts": 1791093298367,
+     "kind": "result",
+     "text": "20 lines - exports normalizeTag, parseTags, hasTag"
+    },
+    {
+     "ts": 1791093298369,
+     "kind": "tool",
+     "text": "Edit src/notes.ts"
+    },
+    {
+     "ts": 1791093298370,
+     "kind": "diff",
+     "text": "src/notes.ts\n  // Core note operations. Pure functions: callers own persistence.\n+ import { hasTag, parseTags } from './tags.ts';\n  "
+    },
+    {
+     "ts": 1791093298372,
+     "kind": "tool",
+     "text": "Edit src/notes.ts"
+    },
+    {
+     "ts": 1791093298373,
+     "kind": "diff",
+     "text": "src/notes.ts\n    all?: boolean;\n+   /** only notes carrying this #tag (case-insensitive) */\n+   tag?: string;\n  }"
+    },
+    {
+     "ts": 1791093298374,
+     "kind": "tool",
+     "text": "Edit src/notes.ts"
+    },
+    {
+     "ts": 1791093298376,
+     "kind": "diff",
+     "text": "src/notes.ts\n  export function listNotes(notes: readonly Note[], opts: ListOptions = {}): Note[] {\n-   const visible = opts.all ? notes : notes.filter((n) => !n.done);\n+   let visible = opts.all ? notes : notes.filter((n) => !n.done);\n+   if (opts.tag) visible = visible.filter((n) => hasTag(n.text, opts.tag!));\n    return [...visible].sort((a, b) => a.createdAt - b.createdAt);\n  ...\n  \n+ /** Tag usage counts, most used first (ties alphabetical). */\n+ export function tagCounts(notes: readonly Note[], opts: { includeDone?: boolean } = {}): Array<[string, number]> {\n+   const counts = new Map<string, number>();\n+   for (const n of notes) {\n+     if (n.done && !opts.includeDone) continue;\n+     for (const t of parseTags(n.text)) counts.set(t, (counts.get(t) ?? 0) + 1);\n+   }\n  ... (3 more lines)"
+    },
+    {
+     "ts": 1791093298696,
+     "kind": "tool",
+     "text": "Edit src/cli.ts"
+    },
+    {
+     "ts": 1791093298698,
+     "kind": "diff",
+     "text": "src/cli.ts\n  // Entry point: notes <command> [args]\n- import { addNote, completeNote, listNotes, removeNote } from './notes.ts';\n+ import { addNote, completeNote, listNotes, removeNote, tagCounts } from './notes.ts';\n  import { defaultNotesPath, loadNotes, saveNotes } from './store.ts';"
+    },
+    {
+     "ts": 1791093298700,
+     "kind": "tool",
+     "text": "Edit src/cli.ts"
+    },
+    {
+     "ts": 1791093298701,
+     "kind": "diff",
+     "text": "src/cli.ts\n  \n+ /** Value after a flag: --tag work / -t work */\n+ function flagValue(args: string[], ...names: string[]): string | undefined {\n+   const i = args.findIndex((a) => names.includes(a));\n+   return i >= 0 ? args[i + 1] : undefined;\n+ }\n+ \n  function parseId(raw: string | undefined): number {"
+    },
+    {
+     "ts": 1791093298703,
+     "kind": "tool",
+     "text": "Edit src/cli.ts"
+    },
+    {
+     "ts": 1791093298704,
+     "kind": "diff",
+     "text": "src/cli.ts\n          const all = rest.includes('--all');\n-         io.out(formatList(listNotes(loadNotes(file), { all }), now()));\n+         const tag = flagValue(rest, '--tag', '-t');\n+         io.out(formatList(listNotes(loadNotes(file), { all, tag }), now()));\n          return 0;"
+    }
+   ]
+  },
+  {
+   "agentId": "kit",
+   "entries": [
+    {
+     "ts": 1791093296634,
+     "kind": "tool",
+     "text": "$ git worktree add -b agentcraft/kit/t2-tag-parser-module"
+    },
+    {
+     "ts": 1791093296634,
+     "kind": "result",
+     "text": "Preparing worktree (new branch 'agentcraft/kit/t2-tag-parser-module') from main"
+    },
+    {
+     "ts": 1791093296718,
+     "kind": "tool",
+     "text": "Read src/notes.ts"
+    },
+    {
+     "ts": 1791093296719,
+     "kind": "result",
+     "text": "38 lines - exports Note, ListOptions, nextId, addNote, completeNote"
+    },
+    {
+     "ts": 1791093296726,
+     "kind": "tool",
+     "text": "Read test/notes.test.ts"
+    },
+    {
+     "ts": 1791093296727,
+     "kind": "result",
+     "text": "26 lines"
+    },
+    {
+     "ts": 1791093296734,
+     "kind": "text",
+     "text": "Writing the tests first, then the parser"
+    },
+    {
+     "ts": 1791093296739,
+     "kind": "tool",
+     "text": "Write test/tags.test.ts"
+    },
+    {
+     "ts": 1791093296740,
+     "kind": "diff",
+     "text": "test/tags.test.ts\n+ import { test } from 'node:test';\n+ import assert from 'node:assert/strict';\n+ import { hasTag, normalizeTag, parseTags } from '../src/tags.ts';\n+ \n+ test('parseTags finds tags in order of appearance', () => {\n+   assert.deepEqual(parseTags('buy oat milk #errands #home'), ['errands', 'home']);\n+ });\n+ \n+ test('parseTags keeps hyphenated tags', () => {\n+   assert.deepEqual(parseTags('fix login #to-do'), ['to-do']);\n+ });\n+ \n+ test('parseTags is case-insensitive and de-duplicates', () => {\n+   assert.deepEqual(parseTags('#Work standup #work'), ['work']);\n  ... (12 more lines)"
+    },
+    {
+     "ts": 1791093296741,
+     "kind": "tool",
+     "text": "Write src/tags.ts"
+    },
+    {
+     "ts": 1791093296742,
+     "kind": "diff",
+     "text": "src/tags.ts\n+ // Tag parsing for notes: \"call mum #family #to-do\" -> [\"family\", \"to-do\"].\n+ // Tags are case-insensitive (stored lowercase) and de-duplicated, in order of appearance.\n+ \n+ const TAG_RE = /#(\\w+)/g;\n+ \n+ export function normalizeTag(raw: string): string {\n+   return raw.replace(/^#/, '').toLowerCase();\n+ }\n+ \n+ export function parseTags(text: string): string[] {\n+   const seen = new Set<string>();\n+   for (const m of text.matchAll(TAG_RE)) seen.add(normalizeTag(m[1]!));\n+   return [...seen];\n+ }\n  ... (5 more lines)"
+    },
+    {
+     "ts": 1791093296747,
+     "kind": "tool",
+     "text": "$ npm test"
+    },
+    {
+     "ts": 1791093297023,
+     "kind": "error",
+     "text": "tests FAILED (0.3s)\nFAIL parseTags keeps hyphenated tags (0.666ms)\nFAIL a # inside a word is not a tag (0.130708ms)\nFAIL hasTag accepts the tag with or without # (0.1345ms)\nFAIL failing tests:"
+    },
+    {
+     "ts": 1791093297043,
+     "kind": "text",
+     "text": "Anchor tags at start/whitespace and allow \"-\" inside"
+    },
+    {
+     "ts": 1791093297045,
+     "kind": "tool",
+     "text": "Edit src/tags.ts"
+    },
+    {
+     "ts": 1791093297046,
+     "kind": "diff",
+     "text": "src/tags.ts\n  \n- const TAG_RE = /#(\\w+)/g;\n+ // A tag starts at the beginning of the text or after whitespace (\"issue#12\" is not a tag) and\n+ // may contain letters, digits, \"_\" and \"-\" (a trailing \"-\" is dropped).\n+ const TAG_RE = /(?:^|\\s)#(\\w[\\w-]*)/g;\n  "
+    },
+    {
+     "ts": 1791093297048,
+     "kind": "tool",
+     "text": "Edit src/tags.ts"
+    },
+    {
+     "ts": 1791093297049,
+     "kind": "diff",
+     "text": "src/tags.ts\n  export function normalizeTag(raw: string): string {\n-   return raw.replace(/^#/, '').toLowerCase();\n+   return raw.replace(/^#/, '').replace(/-+$/, '').toLowerCase();\n  }"
+    },
+    {
+     "ts": 1791093297059,
+     "kind": "tool",
+     "text": "write_memory \"Regex notes\""
+    },
+    {
+     "ts": 1791093297059,
+     "kind": "tool",
+     "text": "$ npm test"
+    },
+    {
+     "ts": 1791093297328,
+     "kind": "result",
+     "text": "tests passed (0.3s)"
+    },
+    {
+     "ts": 1791093297330,
+     "kind": "tool",
+     "text": "$ git commit -am \"Add tag parser (parseTags, hasTag, normalizeTag)\""
+    },
+    {
+     "ts": 1791093297397,
+     "kind": "result",
+     "text": "[agentcraft/kit/t2-tag-parser-module 4f1c9c8] Add tag parser (parseTags, hasTag, normalizeTag)"
+    },
+    {
+     "ts": 1791093298364,
+     "kind": "tool",
+     "text": "$ git worktree add -b agentcraft/kit/t5-tag-edge-cases-unicode"
+    },
+    {
+     "ts": 1791093298364,
+     "kind": "result",
+     "text": "Preparing worktree (new branch 'agentcraft/kit/t5-tag-edge-cases-unicode') from main"
+    },
+    {
+     "ts": 1791093298377,
+     "kind": "tool",
+     "text": "Edit test/tags.test.ts"
+    },
+    {
+     "ts": 1791093298379,
+     "kind": "diff",
+     "text": "test/tags.test.ts\n  \n+ test('tags may use any letters, not just ASCII', () => {\n+   assert.deepEqual(parseTags('#Crème-Brûlée for #café night'), ['crème-brûlée', 'café']);\n+ });\n+ \n+ test('punctuation ends a tag', () => {\n+   assert.deepEqual(parseTags('done with #work, finally.'), ['work']);\n+ });\n+ \n  test('hasTag accepts the tag with or without #', () => {"
+    },
+    {
+     "ts": 1791093298439,
+     "kind": "tool",
+     "text": "$ npm test"
+    },
+    {
+     "ts": 1791093298694,
+     "kind": "error",
+     "text": "tests FAILED (0.3s)\nFAIL tags may use any letters, not just ASCII (0.82025ms)\nFAIL failing tests:"
+    }
+   ]
+  },
+  {
+   "agentId": "wren",
+   "entries": [
+    {
+     "ts": 1791093296717,
+     "kind": "tool",
+     "text": "$ git worktree add -b agentcraft/wren/t4-highlight-tags-in-list"
+    },
+    {
+     "ts": 1791093296717,
+     "kind": "result",
+     "text": "Preparing worktree (new branch 'agentcraft/wren/t4-highlight-tags-in-list') from main"
+    },
+    {
+     "ts": 1791093296720,
+     "kind": "tool",
+     "text": "Read src/format.ts"
+    },
+    {
+     "ts": 1791093296722,
+     "kind": "result",
+     "text": "25 lines - exports relativeTime, formatNote, formatList"
+    },
+    {
+     "ts": 1791093296728,
+     "kind": "tool",
+     "text": "Read test/format.test.ts"
+    },
+    {
+     "ts": 1791093296730,
+     "kind": "result",
+     "text": "21 lines"
+    },
+    {
+     "ts": 1791093296743,
+     "kind": "text",
+     "text": "Colors: a tiny dependency or plain ANSI escapes?"
+    },
+    {
+     "ts": 1791093296745,
+     "kind": "tool",
+     "text": "$ npm install chalk@5"
+    },
+    {
+     "ts": 1791093296745,
+     "kind": "text",
+     "text": "Permission needed: network access + a new dependency. Asking Alex."
+    },
+    {
+     "ts": 1791093297028,
+     "kind": "result",
+     "text": "(sim) install skipped - the demo stays offline"
+    },
+    {
+     "ts": 1791093297028,
+     "kind": "text",
+     "text": "Thanks! On reflection plain ANSI escapes are 4 lines; keeping pocket-notes zero-dependency."
+    },
+    {
+     "ts": 1791093297033,
+     "kind": "tool",
+     "text": "write_memory \"Decisions\""
+    },
+    {
+     "ts": 1791093297034,
+     "kind": "tool",
+     "text": "Edit src/format.ts"
+    },
+    {
+     "ts": 1791093297036,
+     "kind": "diff",
+     "text": "src/format.ts\n  \n+ // \"#tag\" at the start of the text or after whitespace (mirrors src/tags.ts).\n+ const TAG_IN_TEXT = /(^|\\s)(#\\w[\\w-]*)/g;\n+ const CYAN = '\\u001b[36m';\n+ const RESET = '\\u001b[39m';\n+ \n+ export interface FormatOptions {\n+   /** wrap #tags in ANSI cyan (only when writing to a terminal) */\n+   color?: boolean;\n+ }\n+ \n+ export function highlightTags(text: string, color = false): string {\n+   if (!color) return text;\n+   return text.replace(TAG_IN_TEXT, (_m, pre: string, tag: string) => pre + CYAN + tag + RESET);\n  ... (3 more lines)"
+    },
+    {
+     "ts": 1791093297037,
+     "kind": "tool",
+     "text": "Edit src/format.ts"
+    },
+    {
+     "ts": 1791093297039,
+     "kind": "diff",
+     "text": "src/format.ts\n  \n- export function formatNote(note: Note, now = Date.now()): string {\n+ export function formatNote(note: Note, now = Date.now(), opts: FormatOptions = {}): string {\n    const box = note.done ? '[x]' : '[ ]';\n    const id = `#${note.id}`.padEnd(4);\n-   return `${box} ${id} ${note.text}  (${relativeTime(note.createdAt, now)})`;\n+   return `${box} ${id} ${highlightTags(note.text, opts.color)}  (${relativeTime(note.createdAt, now)})`;\n  }"
+    },
+    {
+     "ts": 1791093297040,
+     "kind": "tool",
+     "text": "Edit src/format.ts"
+    },
+    {
+     "ts": 1791093297042,
+     "kind": "diff",
+     "text": "src/format.ts\n  \n- export function formatList(notes: readonly Note[], now = Date.now()): string {\n+ export function formatList(notes: readonly Note[], now = Date.now(), opts: FormatOptions = {}): string {\n    if (notes.length === 0) return 'No notes yet. Add one with: notes add \"buy oat milk\"';\n-   return notes.map((n) => formatNote(n, now)).join('\\n');\n+   return notes.map((n) => formatNote(n, now, opts)).join('\\n');\n  }"
+    },
+    {
+     "ts": 1791093297050,
+     "kind": "tool",
+     "text": "Edit test/format.test.ts"
+    },
+    {
+     "ts": 1791093297052,
+     "kind": "diff",
+     "text": "test/format.test.ts\n  import assert from 'node:assert/strict';\n- import { formatList, formatNote, relativeTime } from '../src/format.ts';\n+ import { formatList, formatNote, highlightTags, relativeTime } from '../src/format.ts';\n  "
+    },
+    {
+     "ts": 1791093297053,
+     "kind": "tool",
+     "text": "Edit test/format.test.ts"
+    },
+    {
+     "ts": 1791093297055,
+     "kind": "diff",
+     "text": "test/format.test.ts\n  \n+ test('highlightTags colors tags only when asked', () => {\n+   assert.equal(highlightTags('buy #oat-milk today', true), 'buy \\u001b[36m#oat-milk\\u001b[39m today');\n+   assert.equal(highlightTags('buy #oat-milk today'), 'buy #oat-milk today');\n+   assert.equal(highlightTags('issue#12', true), 'issue#12');\n+ });\n+ "
+    },
+    {
+     "ts": 1791093297552,
+     "kind": "tool",
+     "text": "$ npm test"
+    },
+    {
+     "ts": 1791093297812,
+     "kind": "result",
+     "text": "tests passed (0.3s)"
+    },
+    {
+     "ts": 1791093297814,
+     "kind": "tool",
+     "text": "$ git commit -am \"Highlight #tags in list output (opt-in color)\""
+    },
+    {
+     "ts": 1791093297880,
+     "kind": "result",
+     "text": "[agentcraft/wren/t4-highlight-tags-in-list 6058d61] Highlight #tags in list output (opt-in color)"
+    }
+   ]
+  },
+  {
+   "agentId": "rowan",
+   "entries": [
+    {
+     "ts": 1791093297493,
+     "kind": "tool",
+     "text": "diff agentcraft/kit/t2-tag-parser-module"
+    },
+    {
+     "ts": 1791093297548,
+     "kind": "result",
+     "text": "2 files, +45 -0: src/tags.ts, test/tags.test.ts"
+    },
+    {
+     "ts": 1791093298380,
+     "kind": "tool",
+     "text": "diff agentcraft/wren/t4-highlight-tags-in-list"
+    },
+    {
+     "ts": 1791093298433,
+     "kind": "result",
+     "text": "2 files, +26 -5: src/format.ts, test/format.test.ts"
+    }
+   ]
+  },
+  {
+   "agentId": "tove",
+   "entries": [
+    {
+     "ts": 1791093296731,
+     "kind": "tool",
+     "text": "Read README.md"
+    },
+    {
+     "ts": 1791093296732,
+     "kind": "result",
+     "text": "28 lines"
+    },
+    {
+     "ts": 1791093298705,
+     "kind": "text",
+     "text": "Drafting the README \"Tags\" section while the CLI lands."
+    }
+   ]
+  }
+ ]
+}

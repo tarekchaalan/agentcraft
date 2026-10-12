@@ -8,6 +8,8 @@ import dev.agentcraft.block.entity.StationBlockEntity;
 import dev.agentcraft.client.diff.ReviewKit;
 import dev.agentcraft.client.foreman.Foreman;
 import dev.agentcraft.client.foreman.Protocol.MemoryEntry;
+import dev.agentcraft.client.mp.StudioView;
+import dev.agentcraft.client.mp.Studios;
 import dev.agentcraft.client.ui.Kit;
 import dev.agentcraft.client.ui.TextUtil;
 import dev.agentcraft.client.ui.UiStyle;
@@ -15,6 +17,7 @@ import dev.agentcraft.client.ui.WorldUi;
 import dev.agentcraft.client.world.StationRenderState;
 import dev.agentcraft.client.world.StationRenderer;
 import java.util.List;
+import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.SubmitNodeCollector;
@@ -89,6 +92,11 @@ public class MemoryArchiveRenderer extends StationRenderer<MemoryArchiveBlockEnt
 
 	@Override
 	protected void extractStation(MemoryArchiveBlockEntity be, State s, float partialTicks) {
+		Optional<StudioView> maybe = Studios.at(be.getBlockPos());
+		if (maybe.isPresent() && !maybe.get().own()) {
+			extractRemote(be, s, maybe.get());
+			return;
+		}
 		Level level = be.getLevel();
 		s.show = false;
 		if (level == null || Foreman.state() == null || !Foreman.state().hasData()) {
@@ -119,6 +127,31 @@ public class MemoryArchiveRenderer extends StationRenderer<MemoryArchiveBlockEnt
 		s.fresh = MemoryIndex.isUnread(e);
 	}
 
+	/**
+	 * The visitor look of the archive: one closed plate on the section's first block, no note titles,
+	 * no count and no unread mark. It never reads {@link Foreman} or {@link MemoryIndex}'s shelves.
+	 */
+	private void extractRemote(MemoryArchiveBlockEntity be, State s, StudioView view) {
+		Level level = be.getLevel();
+		s.show = false;
+		if (level == null) {
+			return;
+		}
+		s.light = LightCoordsUtil.getLightCoords(level, be.getBlockPos().relative(s.facing));
+		int k = rowIndex(level, be.getBlockPos(), be.getBlockState(), s.binding);
+		MemoryIndex.RemoteArchive archive = MemoryIndex.remoteArchive(view.publicState());
+		s.show = k == 0;
+		if (!s.show) {
+			return;
+		}
+		s.plate = true;
+		s.label = archive.label();
+		s.count = "";
+		s.fresh = archive.fresh();
+		s.plan = false;
+		s.tabColor = 0;
+	}
+
 	@Override
 	public void submit(State s, PoseStack ps, SubmitNodeCollector c, CameraRenderState camera) {
 		if (!s.show) {
@@ -145,11 +178,13 @@ public class MemoryArchiveRenderer extends StationRenderer<MemoryArchiveBlockEnt
 				lx += 12;
 			}
 			WorldUi.submitText(ps, c, TextUtil.ellipsize(font, s.label.toUpperCase(java.util.Locale.ROOT), cx - 4 - lx), lx, y + 4, ink, light);
-			ps.pushPose();
-			ps.translate(0, 0, -LIFT);
-			WorldUi.submitNineSlice(ps, c, WorldUi.Layer.SOLID, Kit.progressFill("brass"), cx, y + 3, cw, 10, 0xFFFFFFFF, light);
-			WorldUi.submitText(ps, c, count, cx + (cw - font.width(count) + 1) / 2, y + 4, ink, light);
-			ps.popPose();
+			if (!count.isEmpty()) { // a remote archive's closed plate has no count chip
+				ps.pushPose();
+				ps.translate(0, 0, -LIFT);
+				WorldUi.submitNineSlice(ps, c, WorldUi.Layer.SOLID, Kit.progressFill("brass"), cx, y + 3, cw, 10, 0xFFFFFFFF, light);
+				WorldUi.submitText(ps, c, count, cx + (cw - font.width(count) + 1) / 2, y + 4, ink, light);
+				ps.popPose();
+			}
 		} else {
 			WorldUi.submitNineSlice(ps, c, WorldUi.Layer.SOLID, Kit.PILL, x0, y, x1 - x0, LABEL_H, paper, light);
 			int lx = x0 + 9;

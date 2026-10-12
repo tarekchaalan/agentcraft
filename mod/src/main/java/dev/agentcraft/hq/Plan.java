@@ -65,6 +65,7 @@ final class Plan {
 	final int maxX;
 	final int maxY;
 	final int maxZ;
+	private final BlockPos origin;
 	private final int sx;
 	private final int sy;
 	private final int sz;
@@ -83,8 +84,13 @@ final class Plan {
 		List<String> keptSample) {
 	}
 
-	/** @param ground desired state of an unset cell by y (the meadow profile); the ground top is {@code groundTop}. */
-	Plan(int minX, int minY, int minZ, int maxX, int maxY, int maxZ, int groundTop, IntFunction<BlockState> ground) {
+	/**
+	 * @param origin world offset applied at {@link #apply} time (x/z must be multiples of 16); plan cells stay local.
+	 * @param ground desired state of an unset cell by y (the meadow profile); the ground top is {@code groundTop}.
+	 */
+	Plan(int minX, int minY, int minZ, int maxX, int maxY, int maxZ, BlockPos origin, int groundTop, IntFunction<BlockState> ground) {
+		assert (origin.getX() & 15) == 0 && (origin.getZ() & 15) == 0;
+		this.origin = origin.immutable();
 		this.minX = minX;
 		this.minY = minY;
 		this.minZ = minZ;
@@ -301,20 +307,23 @@ final class Plan {
 		BitSet keptCells = new BitSet();
 		List<BlockPos> deferred = new ArrayList<>();
 		boolean guard = previous != null && previous.length == cells.length && !force;
+		int ox = origin.getX();
+		int oy = origin.getY();
+		int oz = origin.getZ();
 		BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
-		for (int cx = minX >> 4; cx <= maxX >> 4; cx++) {
-			for (int cz = minZ >> 4; cz <= maxZ >> 4; cz++) {
+		for (int cx = (minX + ox) >> 4; cx <= (maxX + ox) >> 4; cx++) {
+			for (int cz = (minZ + oz) >> 4; cz <= (maxZ + oz) >> 4; cz++) {
 				LevelChunk chunk = level.getChunk(cx, cz);
-				int x0 = Math.max(minX, cx << 4);
-				int x1 = Math.min(maxX, (cx << 4) + 15);
-				int z0 = Math.max(minZ, cz << 4);
-				int z1 = Math.min(maxZ, (cz << 4) + 15);
+				int x0 = Math.max(minX, (cx << 4) - ox);
+				int x1 = Math.min(maxX, (cx << 4) + 15 - ox);
+				int z0 = Math.max(minZ, (cz << 4) - oz);
+				int z1 = Math.min(maxZ, (cz << 4) + 15 - oz);
 				for (int y = minY; y <= maxY; y++) {
 					for (int z = z0; z <= z1; z++) {
 						for (int x = x0; x <= x1; x++) {
 							int i = index(x, y, z);
 							BlockState want = cells[i];
-							m.set(x, y, z);
+							m.set(x + ox, y + oy, z + oz);
 							BlockState cur = chunk.getBlockState(m);
 							if (cur != want && !sameDesign(cur, want)) {
 								if (guard && !sameDesign(cur, previous[i])) {
@@ -334,7 +343,7 @@ final class Plan {
 								}
 							}
 							if (connecting(want)) {
-								deferred.add(m.immutable());
+								deferred.add(new BlockPos(x, y, z));
 								want = keepDriven(cur, want);
 								if (!sameIgnoringConnections(cur, want)) {
 									note(sample, m, cur, want);
@@ -357,11 +366,12 @@ final class Plan {
 		// connections from the finished neighbours
 		int connected = 0;
 		for (BlockPos p : deferred) {
-			BlockState cur = level.getBlockState(p);
-			BlockState want = Block.updateFromNeighbourShapes(keepDriven(cur, cells[index(p.getX(), p.getY(), p.getZ())]), level, p);
+			BlockPos world = p.offset(origin);
+			BlockState cur = level.getBlockState(world);
+			BlockState want = Block.updateFromNeighbourShapes(keepDriven(cur, cells[index(p.getX(), p.getY(), p.getZ())]), level, world);
 			if (cur != want) {
-				note(sample, p, cur, want);
-				level.setBlock(p, want, FLAGS);
+				note(sample, world, cur, want);
+				level.setBlock(world, want, FLAGS);
 				connected++;
 			}
 		}
@@ -371,7 +381,8 @@ final class Plan {
 			if (in(p.getX(), p.getY(), p.getZ()) && keptCells.get(index(p.getX(), p.getY(), p.getZ()))) {
 				continue;
 			}
-			if (level.getBlockEntity(p) instanceof StationBlockEntity be) {
+			BlockPos world = p.offset(origin);
+			if (level.getBlockEntity(world) instanceof StationBlockEntity be) {
 				if (!be.binding().equals(e.getValue())) {
 					bound++;
 				}
@@ -394,7 +405,7 @@ final class Plan {
 	 * leave items behind, e.g. carpets that lost their floor). Players, agents and other mobs stay.
 	 */
 	private int clearDrops(ServerLevel level) {
-		AABB box = new AABB(minX, minY, minZ, maxX + 1, maxY + 1, maxZ + 1);
+		AABB box = new AABB(minX, minY, minZ, maxX + 1, maxY + 1, maxZ + 1).move(origin);
 		int n = 0;
 		for (ItemEntity e : level.getEntitiesOfClass(ItemEntity.class, box)) {
 			e.discard();

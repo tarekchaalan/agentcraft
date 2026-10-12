@@ -5,9 +5,11 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import dev.agentcraft.client.dev.DevBridge.DevException;
 import dev.agentcraft.client.dev.Fields;
+import dev.agentcraft.client.mp.dev.MpDevCommands;
 import dev.agentcraft.layout.Anchor;
 import dev.agentcraft.layout.AnchorNames;
 import dev.agentcraft.layout.Anchors;
+import dev.agentcraft.mp.StudioId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -115,12 +117,14 @@ final class CameraPath {
 		Fields pathLook = f.optObj("lookAt");
 		double pathFov = f.optNum("fov", defaultFov, 30, 110);
 		boolean easeEnds = f.optBool("easeEnds", true);
+		// MP-12: an optional studio on the camera JSON (absent or "own" = the local studio); keys resolve there.
+		StudioId studio = MpDevCommands.resolveStudio(f.optStr("studio", null));
 		List<Key> keys = new ArrayList<>();
 		for (int i = 0; i < arr.size(); i++) {
 			if (!arr.get(i).isJsonObject()) {
 				throw new DevException("camera.keys[" + i + "] must be an object");
 			}
-			JsonObject ko = resolveAnchor(arr.get(i).getAsJsonObject(), i);
+			JsonObject ko = resolveAnchor(arr.get(i).getAsJsonObject(), i, studio);
 			Fields k = Fields.of(ko);
 			Key key = new Key();
 			key.t = k.num("t", 0, 1e6);
@@ -186,13 +190,13 @@ final class CameraPath {
 	}
 
 	/** {@code anchor:"name"} fills x/y/z/yaw/pitch (explicit fields win); non-camera anchors are feet positions. */
-	private static JsonObject resolveAnchor(JsonObject key, int index) {
+	private static JsonObject resolveAnchor(JsonObject key, int index, StudioId studio) {
 		Fields f = Fields.of(key);
 		if (!f.has("anchor")) {
 			return key;
 		}
 		String name = f.nonBlank("anchor");
-		Anchor a = Anchors.get(name);
+		Anchor a = Anchors.forStudio(studio).get(name);
 		if (a == null) {
 			throw new DevException("camera.keys[" + index + "]: unknown anchor '" + name + "' (see dev.anchors)");
 		}

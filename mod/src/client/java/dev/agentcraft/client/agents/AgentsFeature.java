@@ -9,6 +9,9 @@ import dev.agentcraft.client.foreman.ForemanListener;
 import dev.agentcraft.client.foreman.ForemanState;
 import dev.agentcraft.client.foreman.Protocol;
 import dev.agentcraft.client.ui.Guard;
+import dev.agentcraft.client.mp.RemoteAgentClicks;
+import dev.agentcraft.client.mp.MpMode;
+import dev.agentcraft.client.mp.Studios;
 import net.minecraft.client.Minecraft;
 import org.jspecify.annotations.Nullable;
 import dev.agentcraft.entity.ModEntities;
@@ -82,6 +85,9 @@ public final class AgentsFeature {
 		ClientTickEvents.END_CLIENT_TICK.register(mc -> Guard.run("agents.tick", () -> AgentManager.get().tick(mc)));
 		// nameplate declutter: every agent's render state is extracted, nothing is submitted yet
 		LevelExtractionEvents.END_EXTRACTION.register(ctx -> Guard.run("agents.plates", () -> PlateLayout.layout(ctx.levelState())));
+		Studios.addListener((id, view) -> AgentManager.get().studioChanged(id));
+		Studios.addEventListener((id, event) -> AgentManager.get().studioEvent(id, event, Minecraft.getInstance()));
+		MpMode.addListener(mode -> AgentManager.get().studioChanged(Studios.own().id()));
 		Foreman.addListener(new ForemanListener() {
 			@Override
 			public void onSnapshot(ForemanState state) {
@@ -123,7 +129,13 @@ public final class AgentsFeature {
 			return InteractionResult.PASS;
 		});
 		// right-click an agent: its card (name, state, task, log tail, message/pause/stop)
-		onClick((player, agent) -> Minecraft.getInstance().gui.setScreen(new AgentCardScreen(agent.agentId())));
+		onClick((player, agent) -> {
+			if (agent.view().remote) {
+				Studios.view(agent.view().studioId).ifPresent(view -> RemoteAgentClicks.fire(view, agent.agentId()));
+			} else {
+				Minecraft.getInstance().gui.setScreen(new AgentCardScreen(agent.agentId()));
+			}
+		});
 		DevBridge.registerScreen("agent", mc -> {
 			String id = AgentCardScreen.defaultAgent();
 			if (id == null) {
@@ -173,13 +185,14 @@ public final class AgentsFeature {
 				return DevBridge.onClient(mc, () -> {
 					JsonObject o = new JsonObject();
 					JsonArray list = new JsonArray();
-					for (ClientAgentEntity e : AgentManager.get().entities().values()) {
+					for (ClientAgentEntity e : AgentManager.get().allEntities()) {
 						if (only != null && !only.equals(e.agentId())) {
 							continue;
 						}
 						AgentLife l = e.life();
 						JsonObject j = new JsonObject();
 						j.addProperty("id", e.agentId());
+						j.addProperty("studio", e.view().studioId.owner().toString());
 						j.addProperty("family", e.view().family);
 						j.addProperty("awaitingUser", e.view().awaitingUser);
 						j.addProperty("awaitingDecision", e.view().awaitingDecision);
@@ -271,7 +284,7 @@ public final class AgentsFeature {
 		DevBridge.addStateContributor((mc, o) -> {
 			JsonObject a = new JsonObject();
 			AgentManager m = AgentManager.get();
-			a.addProperty("count", m.entities().size());
+			a.addProperty("count", m.allEntities().size());
 			a.addProperty("moving", m.movingCount());
 			a.addProperty("pathFailures", m.pathFailures());
 			a.addProperty("plates", PlateLayout.laidOut());
@@ -317,15 +330,17 @@ public final class AgentsFeature {
 						o.addProperty("settled", m.settle());
 						PlateLayout.snapNextFrame();
 					}
-					o.addProperty("count", m.entities().size());
+					o.addProperty("count", m.allEntities().size());
 					o.addProperty("moving", m.movingCount());
 					o.addProperty("plates", PlateLayout.laidOut());
 					o.addProperty("plateOverlaps", PlateLayout.overlaps());
 					JsonArray list = new JsonArray();
-					for (ClientAgentEntity e : m.entities().values()) {
+					for (ClientAgentEntity e : m.allEntities()) {
 						JsonObject j = new JsonObject();
 						AgentView v = e.view();
 						j.addProperty("id", v.id);
+						j.addProperty("studio", v.studioId.owner().toString());
+						j.addProperty("slot", v.studioAgents == null ? 0 : v.studioAgents.slot());
 						j.addProperty("entityId", e.getId());
 						j.addProperty("x", round(e.getX()));
 						j.addProperty("y", round(e.getY()));
@@ -355,7 +370,7 @@ public final class AgentsFeature {
 						j.addProperty("state", v.state.wire());
 						j.addProperty("activity", v.activityLine());
 						j.addProperty("stale", v.stale);
-						PlateLayout.Track pt = PlateLayout.track(v.id);
+						PlateLayout.Track pt = PlateLayout.track(v.plateKey);
 						if (pt != null) {
 							JsonObject pj = new JsonObject();
 							pj.addProperty("mode", pt.compact ? "compact" : "full");

@@ -78,6 +78,22 @@ function Fail([string]$Message, [string[]]$Tail) {
     exit 1
 }
 
+if ($SummaryJson) { $SummaryJson = Resolve-FullPath $SummaryJson }
+
+# --- Node prerequisite (before setup or dependency installation) ---------------------------------
+
+$node = Get-Command node -ErrorAction SilentlyContinue
+if (-not $node) { Fail 'Node.js 22+ is required (https://nodejs.org). `node` is not on PATH.' }
+$nodeVer = ([string](& $node.Source --version)).Trim()
+$nodeOk = $false
+$nodeMajor = 0
+$nodeMinor = 0
+if ($nodeVer -match '^v?(\d+)\.(\d+)\.\d+(?:[-+][0-9A-Za-z.+-]+)?$' -and
+    [int]::TryParse($Matches[1], [ref]$nodeMajor) -and [int]::TryParse($Matches[2], [ref]$nodeMinor)) {
+    $nodeOk = $nodeMajor -ge 22
+}
+if (-not $nodeOk) { Fail "Node.js 22+ is required (found $nodeVer)" }
+
 # --- resolve options -----------------------------------------------------------------------------
 
 $showcaseOn = $Showcase.IsPresent -or [bool]$ShowcaseAt
@@ -107,7 +123,6 @@ if (-not $GradleHome) {
     if ($env:GRADLE_USER_HOME) { $GradleHome = $env:GRADLE_USER_HOME } else { $GradleHome = Join-Path $Main '.gradle-home' }
 }
 $GradleHome = Resolve-FullPath $GradleHome
-if ($SummaryJson) { $SummaryJson = Resolve-FullPath $SummaryJson }
 $repoPaths = @()
 foreach ($r in @($Repo | Where-Object { $_ })) {
     foreach ($part in ($r -split ',')) {
@@ -126,11 +141,6 @@ Write-Kv 'checkout' $Root
 Write-Kv 'home' "$AgentHome  (profile $ForemanProfile)"
 
 # --- prerequisites -------------------------------------------------------------------------------
-
-$node = Get-Command node -ErrorAction SilentlyContinue
-if (-not $node) { Fail 'Node.js 22+ is required (https://nodejs.org). `node` is not on PATH.' }
-$nodeVer = (& $node.Source --version).Trim()
-if ([int]($nodeVer.TrimStart('v').Split('.')[0]) -lt 22) { Fail "Node.js 22+ is required (found $nodeVer)" }
 
 # npm dependencies: installed when node_modules is missing (first run) or older than the lockfile
 # (after a pull that changed dependencies). Never while something of ours may be using them.

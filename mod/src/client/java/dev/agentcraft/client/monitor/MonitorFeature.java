@@ -50,14 +50,14 @@ public final class MonitorFeature {
 	private static final Map<String, Long> AGENT_SEQ = new HashMap<>();
 	private static long epoch;
 	private static final Map<BlockPos, MonitorScreen> SCREENS = new HashMap<>();
-	private static final Map<BlockPos, String> RESOLVED = new HashMap<>();
-	private static long resolvedLayoutRevision = -1;
-	private static String resolvedLayoutName = "";
+	/** Per-panel agent binding, each entry re-resolved only when its own layout changes. */
+	private static final AgentResolutionCache RESOLVED = new AgentResolutionCache();
 
 	private MonitorFeature() {
 	}
 
 	public static void init() {
+		StudioDisplays.init();
 		BlockEntityRenderers.register(ModBlockEntities.MONITOR, ctx -> new MonitorRenderer());
 		Foreman.addListener(new ForemanListener() {
 			@Override
@@ -124,6 +124,7 @@ public final class MonitorFeature {
 					j.addProperty("size", m.panelW + "x" + m.panelH);
 					j.addProperty("ppb", m.ppb);
 					j.addProperty("rows", m.rows.size());
+					j.addProperty("source", m.remoteView == null ? "own" : "remote");
 					j.addProperty("ageMs", (System.nanoTime() - m.lastUsedNanos) / 1_000_000L);
 					arr.add(j);
 				}
@@ -164,24 +165,19 @@ public final class MonitorFeature {
 
 	/**
 	 * The agent a monitor shows: its binding, else the agent whose {@code monitor_<id>} anchor lies
-	 * on this panel, else "feed" (the team activity feed).
+	 * on this panel, else "feed" (the team activity feed). The own path passes {@link Anchors#current()};
+	 * a remote panel passes its studio's layout. The empty-binding walk is cached per panel against the
+	 * layout it resolved, so a remote panel and an own panel no longer evict each other every frame.
 	 */
-	static String resolveAgent(MonitorBlockEntity be, String binding, Direction facing, int w, int h) {
+	static String resolveAgent(MonitorBlockEntity be, String binding, Anchors.Layout layout, Direction facing, int w, int h) {
 		if (!binding.isEmpty()) {
 			return binding;
 		}
-		Anchors.Layout layout = Anchors.current();
-		if (layout.revision() != resolvedLayoutRevision || !layout.name().equals(resolvedLayoutName)) {
-			RESOLVED.clear();
-			resolvedLayoutRevision = layout.revision();
-			resolvedLayoutName = layout.name();
-		}
-		BlockPos origin = be.getBlockPos();
-		String cached = RESOLVED.get(origin);
-		if (cached != null) {
-			return cached;
-		}
-		String found = "feed";
+		return RESOLVED.resolve(be.getBlockPos(), facing, w, h, layout, MonitorFeature::bindingAt);
+	}
+
+	/** The agent whose {@code monitor_<id>} anchor lies on the panel, else "feed". */
+	private static String bindingAt(Anchors.Layout layout, BlockPos origin, Direction facing, int w, int h) {
 		Direction right = facing.getCounterClockWise();
 		for (Map.Entry<String, Anchor> e : layout.anchors().entrySet()) {
 			if (!e.getKey().startsWith(AnchorNames.MONITOR_PREFIX)) {
@@ -192,12 +188,10 @@ public final class MonitorFeature {
 			BlockPos p = BlockPos.containing(a.x(), a.y(), a.z());
 			BlockPos q = BlockPos.containing(a.x() - facing.getStepX() * 0.3, a.y(), a.z() - facing.getStepZ() * 0.3);
 			if (onPanel(origin, right, w, h, p) || onPanel(origin, right, w, h, q)) {
-				found = e.getKey().substring(AnchorNames.MONITOR_PREFIX.length());
-				break;
+				return e.getKey().substring(AnchorNames.MONITOR_PREFIX.length());
 			}
 		}
-		RESOLVED.put(origin.immutable(), found);
-		return found;
+		return "feed";
 	}
 
 	private static boolean onPanel(BlockPos origin, Direction right, int w, int h, BlockPos p) {

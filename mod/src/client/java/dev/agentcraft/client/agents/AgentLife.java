@@ -5,7 +5,9 @@ import dev.agentcraft.client.foreman.Protocol.AgentState;
 import dev.agentcraft.layout.Anchor;
 import dev.agentcraft.layout.AnchorNames;
 import dev.agentcraft.layout.Anchors;
+import java.util.Collection;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
@@ -468,7 +470,9 @@ public final class AgentLife {
 		float wantPitch = 0f;
 		boolean tracking = false;
 		LocalPlayer player = mc.player;
-		Vec3 playerEye = player == null ? null : player.getEyePosition();
+		StudioAgents studio = v.studioAgents;
+		AbstractClientPlayer focusPlayer = v.remote && studio != null && mc.level != null ? studio.ownerPlayer(mc.level) : player;
+		Vec3 playerEye = focusPlayer == null ? null : focusPlayer.getEyePosition();
 		double playerDist = playerEye == null ? Double.MAX_VALUE : playerEye.distanceTo(eye);
 		Vec3 point = null;
 		boolean faceBody = false;
@@ -491,7 +495,7 @@ public final class AgentLife {
 				point = playerEye;
 				faceBody = true;
 			}
-			boolean near = playerEye != null && playerDist < NEAR && inFront(eye, playerEye, body, 105);
+			boolean near = !v.remote && playerEye != null && playerDist < NEAR && inFront(eye, playerEye, body, 105);
 			boolean busy = isBusy(v);
 			if (near && !playerWasNear && busy && age >= nextGreet && player != null && !player.isSpectator()) {
 				greetUntil = age + 40 + rand(20);
@@ -510,7 +514,7 @@ public final class AgentLife {
 				startGlance(v);
 			}
 			if (point == null && age < glanceUntil) {
-				ClientAgentEntity other = glanceAt == Integer.MIN_VALUE ? null : AgentManager.get().byEntityId(glanceAt);
+				ClientAgentEntity other = glanceAt == Integer.MIN_VALUE ? null : studio == null ? null : studio.byEntityId(glanceAt);
 				if (other != null) {
 					point = new Vec3(other.getX(), other.getY() + EYE + other.life().sitOffset(), other.getZ());
 				} else {
@@ -589,7 +593,8 @@ public final class AgentLife {
 		if (who.equals("all")) {
 			return null;
 		}
-		ClientAgentEntity other = AgentManager.get().entity(who);
+		StudioAgents studio = e.view().studioAgents;
+		ClientAgentEntity other = studio == null ? null : studio.entity(who);
 		if (other == null || other == e || other.distanceToSqr(e) > 24 * 24) {
 			return null;
 		}
@@ -602,7 +607,8 @@ public final class AgentLife {
 			return null; // a glance away from the screen
 		}
 		if (v.station.equals("desk") && (posture == Posture.SIT_TYPE || posture == Posture.SIT_IDLE || posture == Posture.TYPE_STAND)) {
-			Anchor mon = Anchors.get(AnchorNames.monitor(v.id));
+			Anchors.Layout layout = v.studioAgents == null ? Anchors.current() : v.studioAgents.layout();
+			Anchor mon = layout.get(AnchorNames.monitor(v.id));
 			if (mon != null && mon.pos().distanceToSqr(e.position()) < 9) {
 				return new Vec3(mon.x(), mon.y() - 0.12, mon.z());
 			}
@@ -619,7 +625,9 @@ public final class AgentLife {
 			ClientAgentEntity best = null;
 			double bestD = 7 * 7;
 			int skip = rand(3);
-			for (ClientAgentEntity o : AgentManager.get().entities().values()) {
+			StudioAgents studio = e.view().studioAgents;
+			Collection<ClientAgentEntity> sameStudio = studio == null ? AgentManager.get().entities().values() : studio.entities().values();
+			for (ClientAgentEntity o : sameStudio) {
 				if (o == e) {
 					continue;
 				}

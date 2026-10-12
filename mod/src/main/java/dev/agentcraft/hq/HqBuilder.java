@@ -1,6 +1,8 @@
 package dev.agentcraft.hq;
 
 import dev.agentcraft.layout.Anchors;
+import dev.agentcraft.mp.StudioId;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 
 /**
@@ -25,7 +27,9 @@ public interface HqBuilder {
 	 * How a build was asked for: {@code force} = reset every cell of the site to the plan, even the
 	 * ones the player changed since the last build (builders that keep such cells honour it).
 	 */
-	record Options(boolean force) {
+	record Options(boolean force, BlockPos origin, StudioId studio) {
+		public Options { origin = origin.immutable(); java.util.Objects.requireNonNull(studio); }
+		public Options(boolean force) { this(force, BlockPos.ZERO, StudioId.LOCAL); }
 		public static final Options DEFAULT = new Options(false);
 	}
 

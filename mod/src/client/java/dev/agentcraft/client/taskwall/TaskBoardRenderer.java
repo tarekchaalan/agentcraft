@@ -10,6 +10,8 @@ import dev.agentcraft.client.foreman.Protocol.TaskStatus;
 import dev.agentcraft.client.monitor.DisplayDraw;
 import dev.agentcraft.client.monitor.DisplayStats;
 import dev.agentcraft.client.monitor.DisplayText;
+import dev.agentcraft.client.monitor.StudioDisplays;
+import dev.agentcraft.client.mp.StudioView;
 import dev.agentcraft.client.ui.Kit;
 import dev.agentcraft.client.ui.UiStyle;
 import dev.agentcraft.client.ui.WorldUi;
@@ -17,6 +19,7 @@ import dev.agentcraft.client.world.StationRenderState;
 import dev.agentcraft.client.world.StationRenderer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.SubmitNodeCollector;
@@ -58,6 +61,7 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 
 	public static class State extends StationRenderState {
 		@Nullable TaskBoard board;
+		@Nullable RemoteBoard remoteBoard;
 		int light;
 		float time;
 		@Nullable String hovered;
@@ -90,6 +94,27 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 			return;
 		}
 		long now = System.nanoTime();
+		Optional<StudioView> at = StudioDisplays.at(be.getBlockPos());
+		if (at.isPresent() && !at.get().own()) {
+			// remote studio: public counts and opt-in titles only, never the viewer's Foreman tasks
+			StudioView v = at.get();
+			RemoteBoard rb = TaskWallFeature.remoteBoard(be.getBlockPos());
+			rb.lastUsedNanos = now;
+			if (rb.syncSource(v, s.panelWidth, s.panelHeight)) {
+				DisplayStats.rebuilt(DisplayStats.Kind.BOARD);
+			}
+			RemoteBoardView view = rb.view;
+			s.board = null;
+			s.remoteBoard = rb;
+			s.time = now / 1e9f;
+			s.light = light(be, s.facing, s.panelWidth, s.panelHeight);
+			s.hovered = null;
+			s.stale = view != null && view.present() && !view.online();
+			s.noData = view == null || !view.present();
+			s.noDataText = s.noData ? DisplayText.WAITING_STUDIO : "";
+			DisplayStats.add(DisplayStats.Kind.BOARD, System.nanoTime() - now);
+			return;
+		}
 		ForemanState fs = Foreman.state();
 		TaskBoard b = TaskWallFeature.board(be.getBlockPos());
 		b.lastUsedNanos = now;
@@ -97,6 +122,7 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 			DisplayStats.rebuilt(DisplayStats.Kind.BOARD);
 		}
 		b.step(now);
+		s.remoteBoard = null;
 		s.board = b;
 		s.time = now / 1e9f;
 		s.light = light(be, s.facing, s.panelWidth, s.panelHeight);
@@ -143,8 +169,25 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 
 	@Override
 	public void submit(State s, PoseStack ps, SubmitNodeCollector c, CameraRenderState camera) {
+		if (!s.panelOrigin) {
+			return;
+		}
+		if (s.remoteBoard != null) {
+			RemoteBoard rb = s.remoteBoard;
+			if (rb.ppb == 0) {
+				return;
+			}
+			long rt = System.nanoTime();
+			ps.pushPose();
+			toFace(ps, s.facing, LINEN_DEPTH, rb.ppb);
+			ps.translate(0, -(s.panelHeight - 1) * rb.ppb, 0);
+			drawRemote(ps, c, rb, rb.view != null && rb.view.online(), rb.view != null && rb.view.present(), s.light);
+			ps.popPose();
+			DisplayStats.add(DisplayStats.Kind.BOARD, System.nanoTime() - rt);
+			return;
+		}
 		TaskBoard b = s.board;
-		if (!s.panelOrigin || b == null || b.ppb == 0) {
+		if (b == null || b.ppb == 0) {
 			return;
 		}
 		long t0 = System.nanoTime();
@@ -155,7 +198,7 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 		int headInk = UiStyle.color("paper.text", 0xFF1F1E1D);
 		int muted = UiStyle.color("paper.muted", 0xFF655E55);
 		// the board's own walnut surface, evenly lit (the block face is shaded by its facing; the cards are not)
-		drawTiled(ps, c, b, SURFACE, light);
+		drawTiled(ps, c, b.ppb, b.pw, b.ph, SURFACE, light);
 		// ---- column rules + headers (one rect batch)
 		DisplayDraw.Rects r = b.lanes.clear();
 		int rule = UiStyle.color("board.rule", 0xFFC9A227);
@@ -220,7 +263,7 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 			drawEmpty(ps, c, b, light);
 		}
 		if (s.stale || s.noData) {
-			drawOffline(ps, c, b, light, s.noData ? s.noDataText : DisplayText.OFFLINE, s.noData);
+			drawOffline(ps, c, b.ppb, b.pw, b.ph, b.veil, b.badge, light, s.noData ? s.noDataText : DisplayText.OFFLINE, s.noData);
 		}
 		ps.popPose();
 		DisplayStats.add(DisplayStats.Kind.BOARD, System.nanoTime() - t0);
@@ -261,16 +304,17 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 	}
 
 	/** Link lost (or never up): the last known board stays, dimmed under a walnut veil, with a paper badge on top. */
-	private static void drawOffline(PoseStack ps, SubmitNodeCollector c, TaskBoard b, int light, String label, boolean never) {
+	private static void drawOffline(PoseStack ps, SubmitNodeCollector c, int ppb, float pw, float ph, DisplayDraw.Rects veil, DisplayDraw.Rects badgeRects,
+		int light, String label, boolean never) {
 		Font font = Minecraft.getInstance().font;
-		DisplayDraw.Rects v = b.veil.clear();
-		float trim = b.ppb * TaskBoard.TRIM / 16f;
-		v.add(trim, trim, b.pw - trim, b.ph - trim, LIFT + 4 * Z, UiStyle.withAlpha(UiStyle.color("palette.colors.walnut", 0xFF3B2A20), 150), light);
+		DisplayDraw.Rects v = veil.clear();
+		float trim = ppb * TaskBoard.TRIM / 16f;
+		v.add(trim, trim, pw - trim, ph - trim, LIFT + 4 * Z, UiStyle.withAlpha(UiStyle.color("palette.colors.walnut", 0xFF3B2A20), 150), light);
 		c.order(0).submitCustomGeometry(ps, DisplayDraw.fillTranslucent(), (pose, vc) -> v.emit(pose, vc, 255, -1));
 		int tw = font.width(label);
 		float w = tw + 20, h = 15;
-		float x = (b.pw - w) / 2f, y = (b.ph - h) / 2f;
-		DisplayDraw.Rects badge = b.badge.clear();
+		float x = (pw - w) / 2f, y = (ph - h) / 2f;
+		DisplayDraw.Rects badge = badgeRects.clear();
 		badge.add(x, y, x + w, y + h, LIFT + 5 * Z, UiStyle.color("board.label", 0xFFF4EFE6), light);
 		badge.add(x, y + h - 1, x + w, y + h, LIFT + 5.5f * Z, UiStyle.color("palette.ui.edge", 0xFFC9BBA3), light);
 		badge.submit(ps, c);
@@ -282,11 +326,10 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 	}
 
 	/** A block texture tiled over the panel inside its trim (one texture repeat per block). */
-	private static void drawTiled(PoseStack ps, SubmitNodeCollector c, TaskBoard b, Identifier spriteId, int light) {
+	private static void drawTiled(PoseStack ps, SubmitNodeCollector c, int ppb, float pw, float ph, Identifier spriteId, int light) {
 		TextureAtlasSprite sp = Minecraft.getInstance().getAtlasManager().getAtlasOrThrow(AtlasIds.BLOCKS).getSprite(spriteId);
-		float trim = b.ppb * TaskBoard.TRIM / 16f;
-		float x0 = trim, y0 = trim, x1 = b.pw - trim, y1 = b.ph - trim;
-		int ppb = b.ppb;
+		float trim = ppb * TaskBoard.TRIM / 16f;
+		float x0 = trim, y0 = trim, x1 = pw - trim, y1 = ph - trim;
 		c.order(0).submitCustomGeometry(ps, DisplayDraw.solid(sp.atlasLocation()), (pose, vc) -> {
 			for (int bx = 0; bx * ppb < x1; bx++) {
 				for (int by = 0; by * ppb < y1; by++) {
@@ -301,6 +344,69 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 				}
 			}
 		});
+	}
+
+	/** Draw a remote board: its own walnut surface, four lane headers with public counts, title cards only. */
+	private static void drawRemote(PoseStack ps, SubmitNodeCollector c, RemoteBoard b, boolean online, boolean present, int light) {
+		int headInk = UiStyle.color("paper.text", 0xFF1F1E1D);
+		int muted = UiStyle.color("paper.muted", 0xFF655E55);
+		drawTiled(ps, c, b.ppb, b.pw, b.ph, SURFACE, light);
+		DisplayDraw.Rects r = b.lanes.clear();
+		int rule = UiStyle.color("board.rule", 0xFFC9A227);
+		for (int i = 0; i < b.columns.size(); i++) {
+			TaskBoard.Column col = b.columns.get(i);
+			if (i > 0) {
+				float rx = col.ax - TaskBoard.GAP / 2f;
+				r.add(rx - 0.5f, b.iy0 + 2, rx + 0.5f, b.iy1 - 2, Z, rule, light);
+			}
+			r.add(col.ax, b.iy0 + 1, col.ax + col.aw, b.iy0 + TaskBoard.HEADER_H - 1, 2 * Z, UiStyle.color("board.label", 0xFFF4EFE6), light);
+			r.add(col.ax, b.iy0 + TaskBoard.HEADER_H - 2, col.ax + col.aw, b.iy0 + TaskBoard.HEADER_H, 2.5f * Z, UiStyle.status(col.family), light);
+			if (col.chip != null) {
+				float cx = col.chipX();
+				r.add(cx, col.chipY, cx + col.chipW, col.chipY + TaskBoard.CHIP_H, 2 * Z, UiStyle.color("board.chip", 0xFFE9E1D3), light);
+				r.add(cx, col.chipY + TaskBoard.CHIP_H - 1, cx + col.chipW, col.chipY + TaskBoard.CHIP_H, 2.5f * Z,
+					UiStyle.color("palette.ui.edge", 0xFFC9BBA3), light);
+			}
+		}
+		r.submit(ps, c);
+		ps.pushPose();
+		ps.translate(0, 0, 3 * Z);
+		for (TaskBoard.Column col : b.columns) {
+			WorldUi.submitText(ps, c, col.label, col.ax + 4, b.iy0 + 3, headInk, light);
+			WorldUi.submitText(ps, c, col.countSeq, col.countX(), b.iy0 + 3, muted, light);
+			if (col.blocked > 0 && col.blockedW > 0) {
+				// the red "N blocked" count sits apart from the Todo count, as on the own wall
+				float bx = col.countX() - 8 - col.blockedW;
+				WorldUi.submitText(ps, c, col.blockedSeq, bx, b.iy0 + 3, UiStyle.color("paper.del_fg", 0xFF873C2A), light);
+			}
+			if (col.chip != null) {
+				WorldUi.submitText(ps, c, col.chip, col.chipX() + 5, col.chipY + 2, muted, light);
+			}
+		}
+		ps.popPose();
+		for (RemoteBoard.Card card : b.cards) {
+			drawRemoteCard(ps, c, card, light);
+		}
+		if (!present) {
+			drawOffline(ps, c, b.ppb, b.pw, b.ph, b.veil, b.badge, light, DisplayText.WAITING_STUDIO, true);
+		} else if (!online) {
+			drawOffline(ps, c, b.ppb, b.pw, b.ph, b.veil, b.badge, light, DisplayText.OFFLINE, false);
+		}
+	}
+
+	/** A remote title card: paper, the title wrapped, blocked cards in the error ink. */
+	private static void drawRemoteCard(PoseStack ps, SubmitNodeCollector c, RemoteBoard.Card card, int light) {
+		TextureAtlasSprite sprite = WorldUi.sprite(Kit.card(card.blocked() ? "blocked" : "todo"));
+		c.order(0).submitCustomGeometry(ps, WorldUi.guiAtlasSolid(), (pose, vc) -> DisplayDraw.nineSlice(pose, vc, sprite, card.x(), card.y(), card.w(),
+			card.h() - 1, 2 * Z, 0xFFFFFFFF, light, 1));
+		int ink = card.blocked() ? UiStyle.color("paper.del_fg", 0xFF873C2A) : UiStyle.color("paper.text", 0xFF1F1E1D);
+		float ty = card.y() + (card.h() - card.lines().size() * TaskBoard.LINE) / 2f + 1;
+		ps.pushPose();
+		ps.translate(0, 0, 3 * Z);
+		for (int i = 0; i < card.lines().size(); i++) {
+			WorldUi.submitText(ps, c, card.lines().get(i), card.x() + RemoteBoard.CARD_PAD, ty + i * TaskBoard.LINE, ink, light);
+		}
+		ps.popPose();
 	}
 
 	private static String family(TaskBoard.Col col) {

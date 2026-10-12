@@ -1,6 +1,9 @@
 package dev.agentcraft.client;
 
 import dev.agentcraft.AgentCraft;
+import dev.agentcraft.mp.MpEvents;
+import dev.agentcraft.mp.MpLog;
+import dev.agentcraft.mp.MpReasons;
 import dev.agentcraft.world.HqWorld;
 import java.util.List;
 import java.util.Optional;
@@ -10,7 +13,9 @@ import net.minecraft.client.Minecraft;
 import dev.agentcraft.client.mixin.BackupConfirmScreenAccessor;
 import net.minecraft.client.gui.screens.AccessibilityOnboardingScreen;
 import net.minecraft.client.gui.screens.BackupConfirmScreen;
+import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.HolderSet;
@@ -38,6 +43,8 @@ public final class AutoWorld {
 	private static boolean attempted;
 	/** True while AutoWorld itself is opening the HQ world (so its confirm screens may be auto-answered). */
 	private static boolean openingHq;
+	/** Set once when AutoWorld must stay out of the way for the whole client session. */
+	private static boolean skipped;
 
 	private AutoWorld() {
 	}
@@ -45,6 +52,12 @@ public final class AutoWorld {
 	public static void init() {
 		if (!ClientEnv.AUTO_WORLD) {
 			AgentCraft.LOGGER.info("AutoWorld disabled (AGENTCRAFT_AUTOWORLD=0)");
+			skip(MpReasons.DISABLED);
+			return;
+		}
+		if (ClientEnv.quickPlayMultiplayer()) {
+			// A direct multiplayer join: the local HQ world must never be created or opened.
+			skip(MpReasons.QUICKPLAY_MULTIPLAYER);
 			return;
 		}
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> openingHq = false);
@@ -59,6 +72,16 @@ public final class AutoWorld {
 				client.execute(() -> ((BackupConfirmScreenAccessor) backup).agentcraft$onProceed().proceed(true, false));
 				return;
 			}
+			if (skipped) {
+				return;
+			}
+			if (screen instanceof JoinMultiplayerScreen || screen instanceof ConnectScreen) {
+				// The player picked multiplayer before AutoWorld opened the HQ world (for example after
+				// a failed quick play). Cancel for the session so the deferred open cannot steal it.
+				skip(MpReasons.MULTIPLAYER_SCREEN);
+				attempted = true;
+				return;
+			}
 			if (attempted) {
 				return;
 			}
@@ -70,7 +93,26 @@ public final class AutoWorld {
 		});
 	}
 
+	/**
+	 * Records the one-time skip for this session. Package-private test seam; the reason is always a
+	 * {@link MpReasons} constant, never a launch argument or a server address.
+	 */
+	static void skip(String reason) {
+		if (skipped) {
+			return;
+		}
+		skipped = true;
+		MpLog.event(MpEvents.AUTOWORLD_SKIPPED, "reason", reason);
+	}
+
 	public static void openOrCreate(Minecraft mc) {
+		if (mc.gui.screen() instanceof JoinMultiplayerScreen || mc.gui.screen() instanceof ConnectScreen) {
+			// The player opened multiplayer while the deferred open was queued.
+			skip(MpReasons.MULTIPLAYER_SCREEN);
+		}
+		if (skipped) {
+			return;
+		}
 		try {
 			if (mc.getLevelSource().levelExists(HqWorld.LEVEL_NAME)) {
 				AgentCraft.LOGGER.info("AutoWorld: loading existing world '{}'", HqWorld.LEVEL_NAME);

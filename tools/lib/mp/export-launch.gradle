@@ -1,0 +1,28 @@
+// Read Loom's actual run tasks without executing either game or changing build.gradle.
+import groovy.json.JsonOutput
+
+gradle.projectsEvaluated {
+    def p = gradle.rootProject
+    p.tasks.register('mpExportLaunch') {
+        dependsOn 'classes', 'clientClasses', 'configureClientLaunch'
+        notCompatibleWithConfigurationCache('exports live Loom run task providers')
+        doLast {
+            def launches = [:]
+            ['client': 'runClient', 'server': 'runServer'].each { kind, taskName ->
+                def run = p.tasks.getByName(taskName)
+                // We write our own portable Java argfile; Loom's would only exist after run*.
+                run.useArgFile.set(false)
+                def jvm = new ArrayList(run.jvmArgs ?: [])
+                run.systemProperties.each { key, value -> jvm.add("-D${key}=${value}".toString()) }
+                run.jvmArgumentProviders.each { jvm.addAll(it.asArguments().collect { it.toString() }) }
+                def args = new ArrayList(run.args ?: [])
+                run.argumentProviders.each { args.addAll(it.asArguments().collect { it.toString() }) }
+                launches[kind] = [main: run.mainClass.get(), classpath: run.classpath.files.collect { it.absolutePath },
+                                  jvmArgs: jvm, args: args]
+            }
+            def output = p.file(p.findProperty('mpLaunchFile'))
+            output.parentFile.mkdirs()
+            output.text = JsonOutput.prettyPrint(JsonOutput.toJson(launches)) + '\n'
+        }
+    }
+}

@@ -13,16 +13,20 @@ import dev.agentcraft.client.foreman.Protocol.Decision;
 import dev.agentcraft.client.foreman.Protocol.Repo;
 import dev.agentcraft.client.foreman.Protocol.Task;
 import dev.agentcraft.client.foreman.Protocol.Worktree;
+import dev.agentcraft.client.mp.StudioView;
+import dev.agentcraft.client.mp.Studios;
 import dev.agentcraft.client.ui.Kit;
 import dev.agentcraft.client.ui.TextUtil;
 import dev.agentcraft.client.ui.UiStyle;
 import dev.agentcraft.client.ui.WorldUi;
 import dev.agentcraft.client.world.StationRenderState;
 import dev.agentcraft.client.world.StationRenderer;
+import dev.agentcraft.mp.state.PublicStudioState;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.SubmitNodeCollector;
@@ -125,8 +129,26 @@ public class MergeStationRenderer extends StationRenderer<MergeStationBlockEntit
 		return k;
 	}
 
+	/**
+	 * The visitor look of the merge station: the public open-merge count, or an "all merged" card.
+	 * No worker, task title, diff stats, CI or repo data.
+	 */
+	public record RemoteCard(int count, boolean empty, String title) {
+	}
+
+	/** The remote card from a public state ({@code null} = the remote state has not arrived yet). */
+	public static RemoteCard remoteCard(@Nullable PublicStudioState state) {
+		int count = state == null ? 0 : state.counts().openMerges();
+		return new RemoteCard(count, count == 0, count == 0 ? "" : "merge waiting");
+	}
+
 	@Override
 	protected void extractStation(MergeStationBlockEntity be, State s, float partialTicks) {
+		Optional<StudioView> maybe = Studios.at(be.getBlockPos());
+		if (maybe.isPresent() && !maybe.get().own()) {
+			extractRemote(be, s, maybe.get());
+			return;
+		}
 		Level level = be.getLevel();
 		s.show = false;
 		if (level == null || Foreman.state() == null || !Foreman.state().hasData()) {
@@ -178,6 +200,38 @@ public class MergeStationRenderer extends StationRenderer<MergeStationBlockEntit
 			case RUNNING -> "testing";
 			default -> "";
 		};
+	}
+
+	/**
+	 * The visitor card for a remote studio. The first station of the row shows the public open-merge
+	 * count as "merge waiting"; the rest of the row stays bare. It never reads {@link Foreman}, the
+	 * decision queue, task titles or diff stats.
+	 */
+	private void extractRemote(MergeStationBlockEntity be, State s, StudioView view) {
+		Level level = be.getLevel();
+		s.show = false;
+		// before the studio's first public state arrives there is nothing to say: no card, not "all merged"
+		if (level == null || view.publicState() == null) {
+			return;
+		}
+		s.light = LightCoordsUtil.getLightCoords(level, be.getBlockPos().above());
+		int k = rowIndex(level, be.getBlockPos(), be.getBlockState());
+		RemoteCard card = remoteCard(view.publicState());
+		s.index = 0;
+		s.count = card.count();
+		s.show = k == 0;
+		if (!s.show) {
+			return;
+		}
+		s.empty = card.empty();
+		s.worker = null;
+		s.name = "";
+		s.taskId = "";
+		s.title = card.title();
+		s.adds = s.dels = s.files = "";
+		s.ciFamily = "idle";
+		s.ciInk = 0;
+		s.ciLabel = "";
 	}
 
 	@Override

@@ -5,6 +5,7 @@ import dev.agentcraft.client.foreman.Protocol.Station;
 import dev.agentcraft.layout.Anchor;
 import dev.agentcraft.layout.AnchorNames;
 import dev.agentcraft.layout.Anchors;
+import dev.agentcraft.mp.state.PublicAgent;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -25,6 +26,10 @@ import org.jspecify.annotations.Nullable;
 public final class StationAssigner {
 	private final Map<String, String> assigned = new HashMap<>();
 
+	/** One agent to place: its id and the station key it should be at. */
+	private record Placement(String id, String station) {
+	}
+
 	/** The station key an agent should be at: "desk", a shared station name, or "lounge". */
 	public static String stationKey(Agent a) {
 		if (!a.isActive()) {
@@ -34,12 +39,38 @@ public final class StationAssigner {
 		return s == Station.UNKNOWN ? AnchorNames.LOUNGE : s.wire();
 	}
 
+	public static String stationKey(PublicAgent a) {
+		if (!a.active()) {
+			return AnchorNames.LOUNGE;
+		}
+		String station = a.station().wire();
+		return station.equals("unknown") ? AnchorNames.LOUNGE : station;
+	}
+
 	/** Assign every agent (in order) and return agentId -> anchor (absent when the layout has nothing usable). */
 	public Map<String, Anchor> assign(List<Agent> agents, Anchors.Layout layout) {
+		List<Placement> placements = new ArrayList<>(agents.size());
+		for (Agent agent : agents) {
+			placements.add(new Placement(agent.id(), stationKey(agent)));
+		}
+		return assignPlacements(placements, layout);
+	}
+
+	/** Public-state counterpart; it deliberately does not construct a Foreman protocol Agent. */
+	public Map<String, Anchor> assignPublic(List<PublicAgent> agents, Anchors.Layout layout) {
+		List<Placement> placements = new ArrayList<>(agents.size());
+		for (PublicAgent agent : agents) {
+			String station = stationKey(agent);
+			placements.add(new Placement(agent.id(), station));
+		}
+		return assignPlacements(placements, layout);
+	}
+
+	private Map<String, Anchor> assignPlacements(List<Placement> agents, Anchors.Layout layout) {
 		Map<String, Anchor> out = new LinkedHashMap<>();
-		Map<String, List<Agent>> byStation = new LinkedHashMap<>();
-		for (Agent a : agents) {
-			String key = stationKey(a);
+		Map<String, List<Placement>> byStation = new LinkedHashMap<>();
+		for (Placement a : agents) {
+			String key = a.station();
 			if (key.equals("desk")) {
 				Anchor desk = layout.get(AnchorNames.desk(a.id()));
 				if (desk != null) {
@@ -61,9 +92,9 @@ public final class StationAssigner {
 				continue;
 			}
 			Set<String> taken = new HashSet<>();
-			List<Agent> unplaced = new ArrayList<>();
+			List<Placement> unplaced = new ArrayList<>();
 			// keep sticky assignments that are still slots of this station
-			for (Agent a : e.getValue()) {
+			for (Placement a : e.getValue()) {
 				String prev = assigned.get(a.id());
 				Anchor keep = null;
 				if (prev != null && !taken.contains(prev)) {
@@ -82,7 +113,7 @@ public final class StationAssigner {
 				}
 			}
 			int overflow = 0;
-			for (Agent a : unplaced) {
+			for (Placement a : unplaced) {
 				Anchor pick = null;
 				for (Anchor s : slots) {
 					if (!taken.contains(s.name())) {
@@ -116,7 +147,7 @@ public final class StationAssigner {
 	}
 
 	/** Extra agents line up sideways from the primary slot (alternating right/left, 1.1 blocks apart). */
-	private static Anchor overflowSpot(Anchor primary, int k) {
+	static Anchor overflowSpot(Anchor primary, int k) {
 		double side = ((k + 1) / 2) * 1.1 * (k % 2 == 1 ? 1 : -1);
 		double rad = Math.toRadians(primary.yaw());
 		// facing vector (-sin, cos); right-hand perpendicular (cos, sin)
