@@ -5,11 +5,16 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import dev.agentcraft.AgentCraft;
 import dev.agentcraft.Cast;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import net.minecraft.client.Minecraft;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Colour and metric tokens of the Warm Studio UI, read from the synced art files
@@ -25,10 +30,13 @@ import java.util.Map;
  * UiStyle.metric("metrics.gui_panel_padding", 8)
  * </pre>
  *
- * <p>Dark theme (the default; {@code AGENTCRAFT_THEME=light} or {@code /theme light} for paper):
- * {@link #color} answers the {@code gui/ui-style-dark.json} value of a token when it has one, paper
- * sprites are tinted dark ({@link #paperTint}) and {@link #agentOnLight} gives the on-dark colour.
- * Light text drawn on clay buttons or ink tooltips asks {@link #base}, which ignores the theme.
+ * <p>Themes: light (paper, the default) or dark. With the dark theme on, {@link #color} answers the
+ * {@code gui/ui-style-dark.json} value of a token when it has one, paper sprites are tinted dark
+ * ({@link #paperTint}) and {@link #agentOnLight} gives the on-dark colour. Light text drawn on clay
+ * buttons or ink tooltips asks {@link #base}, which ignores the theme, and the in-world displays
+ * (monitors, task board, terminal, podium) keep their own look. Chosen with {@code /theme dark|light}
+ * in the console, kept in {@code <game dir>/agentcraft/theme.txt}; {@code AGENTCRAFT_THEME=dark|light}
+ * in the environment wins over the saved choice for that run (QA runs, launchers).
  */
 public final class UiStyle {
 	public static final int CREAM = 0xFFF4EFE6;
@@ -44,7 +52,7 @@ public final class UiStyle {
 	private static final Map<String, Integer> COLORS = new HashMap<>();
 	private static final Map<String, Double> NUMBERS = new HashMap<>();
 	private static final Map<String, Integer> DARK = new HashMap<>();
-	private static volatile boolean dark = !"light".equalsIgnoreCase(System.getenv("AGENTCRAFT_THEME"));
+	private static volatile boolean dark = initialTheme();
 
 	static {
 		load("/assets/agentcraft/gui/ui-style.json", "", COLORS);
@@ -57,8 +65,44 @@ public final class UiStyle {
 		return dark;
 	}
 
+	/** Switches the theme for the screens opened from now on and remembers it for the next start. */
 	public static void setDark(boolean on) {
 		dark = on;
+		Path file = themeFile();
+		if (file == null) {
+			return;
+		}
+		try {
+			Files.createDirectories(file.getParent());
+			Files.writeString(file, on ? "dark" : "light", StandardCharsets.UTF_8);
+		} catch (IOException e) {
+			AgentCraft.LOGGER.warn("UiStyle: could not save the theme to {}", file, e);
+		}
+	}
+
+	/** Light unless AGENTCRAFT_THEME says dark, or (without that variable) the saved choice does. */
+	private static boolean initialTheme() {
+		String env = System.getenv("AGENTCRAFT_THEME");
+		if (env != null && !env.isBlank()) {
+			return env.trim().equalsIgnoreCase("dark");
+		}
+		Path file = themeFile();
+		if (file != null && Files.exists(file)) {
+			try {
+				return Files.readString(file, StandardCharsets.UTF_8).trim().equalsIgnoreCase("dark");
+			} catch (IOException e) {
+				AgentCraft.LOGGER.warn("UiStyle: could not read the saved theme {}", file, e);
+			}
+		}
+		return false;
+	}
+
+	private static @Nullable Path themeFile() {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc == null || mc.gameDirectory == null) {
+			return null;
+		}
+		return mc.gameDirectory.toPath().resolve("agentcraft").resolve("theme.txt");
 	}
 
 	private UiStyle() {

@@ -36,7 +36,7 @@ back the next time it opens (this session), and the console terminal shows it on
 | `/pause @x`, `/resume @x`, `/stop @x` (also `all`), `/spawn @x [task]` | `agent.action` |
 | `/task <id> cancel\|retry\|prioritize [n]\|reassign @x` | `task.action` |
 | `/diff [worktree\|@agent\|task]` | opens the diff screen (`diff`, owned by the diff feature); without one, prints a file summary from `diff.request` |
-| `/status`, `/help`, `/decide`, `/clear`, `/sound on\|off` | local |
+| `/status`, `/help`, `/decide`, `/clear`, `/sound on\|off`, `/theme dark\|light` | local |
 
 Tab completes agent names (also after `/pause` etc.), commands, decision ids and options, task ids
 and worktrees; repeated Tab cycles, Up/Down move in the popup. Up/Down otherwise walk the history
@@ -102,6 +102,10 @@ covers (tied to key 2). Buttons: Allow once (1), Always allow (2, sends the exac
 - Sounds: a soft note-block bell when a decision opens, a chime when a task is done, a bigger chime
   when the goal completes. Never on a reconnect snapshot. Off when the game runs muted
   (`AGENTCRAFT_MUTE=1`, the dev/QA default) or after `/sound off`.
+- Theme: `/theme dark` turns the paper screens and the HUD dark (panels, fields and plain buttons
+  tinted, ink text light, agent names in their on-dark colours; clay buttons, status dots and the
+  in-world displays keep their look). `/theme light` is the default. The choice is kept in
+  `<game dir>/agentcraft/theme.txt`; `AGENTCRAFT_THEME=dark|light` overrides it for one run.
 
 ## In the world
 
