@@ -143,7 +143,7 @@ function start(command, args, cwd, log, env = {}) {
 // The Claude Code CLI the agent SDK runs. Its login is separate from the Claude desktop app's.
 function claudeCli() {
   installDeps(path.join(root, 'foreman'));
-  const bundled = path.join(root, 'foreman', 'node_modules', '@anthropic-ai', `claude-agent-sdk-${process.platform}-${process.arch}`, 'claude');
+  const bundled = path.join(root, 'foreman', 'node_modules', '@anthropic-ai', `claude-agent-sdk-${process.platform}-${process.arch}`, process.platform === 'win32' ? 'claude.exe' : 'claude');
   return fs.existsSync(bundled) ? bundled : 'claude';
 }
 
