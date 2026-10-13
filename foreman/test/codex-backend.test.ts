@@ -64,14 +64,22 @@ const readLog = (file: string): LogLine[] =>
 /**
  * A Codex worker's writable roots: objects, its own worktree git dir, temp, and only its own
  * branches' refs and reflogs. Never the shared .git (config, hooks, other branches).
+ * The git dirs are the ones git verified, spelled as git spells them: the repository's real path
+ * (8.3 short names expanded, links resolved), which is also what the worktree's .git pointer
+ * names. That can differ from the path the repo was given by: GitHub's Windows runners have TEMP
+ * under C:\Users\RUNNER~1, macOS's temp dir is under the /var -> /private/var link. The temp dir
+ * is granted as the OS names it (what the agent's TEMP/TMP say).
  */
-const gitRoots = (repo: string, worktreeId: string, agent: string) => [
-  path.join(repo, '.git', 'objects'),
-  path.join(repo, '.git', 'worktrees', worktreeId),
-  os.tmpdir(),
-  path.join(repo, '.git', 'refs', 'heads', 'agentcraft', agent),
-  path.join(repo, '.git', 'logs', 'refs', 'heads', 'agentcraft', agent),
-];
+const gitRoots = (repo: string, worktreeId: string, agent: string) => {
+  const git = path.join(fs.realpathSync.native(repo), '.git');
+  return [
+    path.join(git, 'objects'),
+    path.join(git, 'worktrees', worktreeId),
+    os.tmpdir(),
+    path.join(git, 'refs', 'heads', 'agentcraft', agent),
+    path.join(git, 'logs', 'refs', 'heads', 'agentcraft', agent),
+  ];
+};
 
 let h: Harness;
 let home: string;
@@ -241,6 +249,36 @@ describe('codex engine (fake app-server)', () => {
       await isolated.fm.close();
       rmrf(isolatedHome);
       rmrf(path.dirname(isolatedRepo));
+    }
+  });
+
+  it('grants the worktree gitdir as its .git pointer names it when the repo is added through a link', async () => {
+    // The path a repo is added by need not be git's spelling of it (an 8.3 short name, a link), and
+    // Codex lets a worker write the worktree's git dir only when it is granted exactly as the .git
+    // pointer names it. A junction (a symlink off Windows) stands in for every such alias.
+    const isolatedHome = tempDir();
+    const realRepo = await demoRepo();
+    const links = tempDir('ac-link-');
+    const alias = path.join(links, 'demo-app');
+    fs.symlinkSync(realRepo, alias, 'junction');
+    const isolated = makeForeman(isolatedHome, ['--backend', 'sim']);
+    try {
+      const repo = await isolated.fm.repos.add(alias);
+      const task = isolated.fm.tasks.create({ title: 'git access', createdBy: 'marlow', repoId: repo.id, assignee: 'kit' });
+      const own = await isolated.fm.repos.createWorktree(repo.id, 'kit', task);
+      task.worktree = own.id;
+      const engine = new CodexEngine(isolated.fm, isolated.cfg.codex);
+      const backend = new TeamBackend(isolated.fm, isolated.cfg.claude, { name: 'codex', engines: { lead: engine, worker: engine } });
+      const job = { kind: 'work' as const, agentId: 'kit', taskId: task.id, sessionKey: 'kit:test', prompt: '' };
+      const roots: string[] = await backend['writableRoots']('worker', job);
+      expect(roots).toEqual(gitRoots(alias, own.id, 'kit'));
+      const pointer = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(path.join(own.path, '.git'), 'utf8'))![1]!.trim();
+      expect(roots).toContain(path.resolve(pointer));
+    } finally {
+      await isolated.fm.close();
+      rmrf(isolatedHome);
+      rmrf(links); // removes the link, never what it points at
+      rmrf(path.dirname(realRepo));
     }
   });
 });

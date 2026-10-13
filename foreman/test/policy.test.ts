@@ -14,6 +14,9 @@ const worker: PolicyContext = { role: 'worker', cwd: wt, tempDirs: [] };
 const lead: PolicyContext = { role: 'lead', cwd: wt, tempDirs: [] };
 const withTemp: PolicyContext = { role: 'worker', cwd: wt };
 const leadReads: PolicyContext = { ...lead, leadReadCommands: ['bd show'] };
+// system paths, outside every worktree: `C:/...` is absolute only on Windows (elsewhere it is a
+// relative path, inside the worktree: see 'subst: outside write inside')
+const [systemDir, systemFile] = process.platform === 'win32' ? ['C:/Windows/system32', 'C:/Windows/x.txt'] : ['/etc', '/etc/x.txt'];
 
 type Row = [string, string, Record<string, unknown>, PolicyContext, 'allow' | 'ask' | 'deny'];
 const bash = (label: string, command: string, expected: 'allow' | 'ask' | 'deny', ctx: PolicyContext = worker): Row => [label, 'Bash', { command }, ctx, expected];
@@ -372,7 +375,7 @@ const rows: Row[] = [
   ['ps where/format', 'PowerShell', { command: 'Get-ChildItem | Where-Object { $_.Length -gt 100 } | Format-Table Name' }, worker, 'allow'],
   ['ps foreach expression', 'PowerShell', { command: 'Get-ChildItem src | ForEach-Object { $_.FullName }' }, worker, 'allow'],
   ['ps foreach runs a command inside', 'PowerShell', { command: 'Get-ChildItem src | % { Remove-Item src/x.ts }' }, worker, 'allow'],
-  ['ps foreach deletes outside', 'PowerShell', { command: 'ForEach-Object { Remove-Item C:/Windows/system32 -Recurse }' }, worker, 'ask'],
+  ['ps foreach deletes outside', 'PowerShell', { command: `ForEach-Object { Remove-Item ${systemDir} -Recurse }` }, worker, 'ask'],
   ['ps foreach deletes a variable path', 'PowerShell', { command: 'Get-ChildItem src | ForEach-Object { Remove-Item $_ }' }, worker, 'ask'],
   ['ps foreach -Process system command', 'PowerShell', { command: 'ForEach-Object -Process { reboot }' }, worker, 'ask'],
   ['ps where call operator', 'PowerShell', { command: 'Get-ChildItem | Where-Object { & $cmd }' }, worker, 'ask'],
@@ -380,7 +383,7 @@ const rows: Row[] = [
   ['ps set-content inside', 'PowerShell', { command: 'Set-Content -Path src/x.ts -Value hi' }, worker, 'allow'],
   ['ps set-content positional', 'PowerShell', { command: 'Set-Content src/x.ts "hi there"' }, worker, 'allow'],
   ['ps out-file outside', 'PowerShell', { command: 'Get-Content src/cli.ts | Out-File ../../outside.txt' }, worker, 'ask'],
-  ['ps set-content outside', 'PowerShell', { command: 'Set-Content -Path C:/Windows/x.txt -Value hi' }, worker, 'ask'],
+  ['ps set-content outside', 'PowerShell', { command: `Set-Content -Path ${systemFile} -Value hi` }, worker, 'ask'],
   ['ps lead filters', 'PowerShell', { command: 'Get-ChildItem src -Recurse | Select-Object FullName' }, lead, 'allow'],
   ['ps lead set-content', 'PowerShell', { command: 'Set-Content -Path src/x.ts -Value hi' }, lead, 'ask'],
 ];
