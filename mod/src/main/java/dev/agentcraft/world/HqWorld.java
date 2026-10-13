@@ -5,6 +5,9 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import dev.agentcraft.AgentCraft;
+import dev.agentcraft.mp.MpEvents;
+import dev.agentcraft.mp.MpLog;
+import dev.agentcraft.mp.MpServerConfig;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -28,6 +31,11 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>Every AgentCraft world carries a marker file {@code agentcraft-world.json} in its folder: who
  * created it, when, its profile and (natural worlds) the {@link HqSite} the HQ was built on.
+ *
+ * <p>On a dedicated server, "multiplayer" means {@code isDedicatedServer() && MpServerConfig
+ * .current().enabled()} and replaces the profile gate: the studio's rules apply by config, without
+ * the HQ's LOCAL build, anchor load or global spawn move. The profile path is untouched when the
+ * flag is off and in singleplayer (the rollback lever).
  */
 public final class HqWorld {
 	/** Folder name and level name of the studio world (the original, creative HQ world). */
@@ -44,22 +52,18 @@ public final class HqWorld {
 
 	public static void init() {
 		ServerLifecycleEvents.SERVER_STARTED.register(HqWorld::onServerStarted);
-		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
-			WorldProfile profile = profileOf(server);
-			if (profile == null || profile.survival()) {
-				return;
-			}
-			ServerPlayer player = handler.getPlayer();
-			// DevBridge camera shots switch to spectator; normal play in the studio should resume in creative.
-			if (player.gameMode() == GameType.SPECTATOR || player.gameMode() == GameType.SURVIVAL) {
-				player.setGameMode(GameType.CREATIVE);
-			}
-		});
+		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> onPlayerJoin(server, handler.getPlayer()));
+	}
+
+	/** Enabled dedicated server, read from the live config at call time (never cached). */
+	public static boolean multiplayer(MinecraftServer server) {
+		return server.isDedicatedServer() && MpServerConfig.current().enabled();
 	}
 
 	/**
 	 * An AgentCraft world (studio or survival): the HQ builds itself here, anchors load here and the
-	 * rules are rewritten here, so never a Hardcore world.
+	 * rules are rewritten here, so never a Hardcore world. Multiplayer turns it off, so no LOCAL
+	 * studio is built (plots are).
 	 */
 	public static boolean isHq(MinecraftServer server) {
 		return profileOf(server) != null;
@@ -67,10 +71,10 @@ public final class HqWorld {
 
 	/**
 	 * The profile of the running world: what its marker file says, else what its level name says;
-	 * null for a world that is not an AgentCraft world (or is Hardcore).
+	 * null for a world that is not an AgentCraft world, a Hardcore world, and a multiplayer server.
 	 */
 	public static @Nullable WorldProfile profileOf(MinecraftServer server) {
-		if (server.getWorldData().isHardcore()) {
+		if (server.getWorldData().isHardcore() || multiplayer(server)) {
 			return null;
 		}
 		JsonObject marker = readMarker(server);
@@ -149,6 +153,17 @@ public final class HqWorld {
 	}
 
 	private static void onServerStarted(MinecraftServer server) {
+		if (multiplayer(server)) {
+			// Rule profile and first-start block live under worldRules; setworldspawn never runs (a shared
+			// world's spawn belongs to the per-plot respawn).
+			if (applyServerRules(server) > 0 && !Files.exists(markerPath(server))) {
+				run(server, "time set " + INITIAL_TIME);
+				run(server, "weather clear");
+				writeMarker(server, newMarker(null));
+				AgentCraft.LOGGER.info("Initialised fresh multiplayer world (time {}, clear weather)", INITIAL_TIME);
+			}
+			return;
+		}
 		WorldProfile profile = profileOf(server);
 		if (profile == null) {
 			return;
@@ -165,6 +180,42 @@ public final class HqWorld {
 			writeMarker(server, newMarker(profile));
 			AgentCraft.LOGGER.info("Initialised fresh {} world '{}'{}", profile.id(), server.getWorldData().getLevelName(),
 				profile.survival() ? " (vanilla rules)" : " (time " + INITIAL_TIME + ", clear weather)");
+		}
+	}
+
+	/**
+	 * Applies the multiplayer rule profile when the live config asks for it; returns the number of
+	 * rules written (0 when not multiplayer or {@code worldRules} is off). Public as the game-test seam.
+	 */
+	public static int applyServerRules(MinecraftServer server) {
+		if (!multiplayer(server) || !MpServerConfig.current().worldRules()) {
+			return 0;
+		}
+		int rules = applyStudioRules(server, true);
+		MpLog.event(MpEvents.WORLD_RULES_APPLIED, "rules", rules);
+		return rules;
+	}
+
+	/** Joins in a singleplayer studio world or in multiplayer: force creative only where the mode asks for it. */
+	public static void onPlayerJoin(MinecraftServer server, ServerPlayer player) {
+		if (multiplayer(server)) {
+			if (!MpServerConfig.current().forceCreative()) {
+				return;
+			}
+			GameType from = player.gameMode();
+			if ((from == GameType.SURVIVAL || from == GameType.SPECTATOR) && player.setGameMode(GameType.CREATIVE)) {
+				// from_mode is a closed enum name, never anything the player supplied.
+				MpLog.event(MpEvents.CREATIVE_FORCED, "player", player.getUUID(), "from_mode", from.getName());
+			}
+			return;
+		}
+		WorldProfile profile = profileOf(server);
+		if (profile == null || profile.survival()) {
+			return;
+		}
+		// DevBridge camera shots switch to spectator; normal play in the studio should resume in creative.
+		if (player.gameMode() == GameType.SPECTATOR || player.gameMode() == GameType.SURVIVAL) {
+			player.setGameMode(GameType.CREATIVE);
 		}
 	}
 
@@ -192,6 +243,15 @@ public final class HqWorld {
 			}
 			return;
 		}
+		applyStudioRules(server, false);
+	}
+
+	/**
+	 * The studio's rules; a shared (multiplayer) server keeps op commands auditable, the integrated
+	 * studio turns their logging off as before. Returns the number of rules written.
+	 */
+	private static int applyStudioRules(MinecraftServer server, boolean logAdminCommands) {
+		GameRules rules = server.getGameRules();
 		// no day, no weather, no mobs
 		rules.set(GameRules.ADVANCE_TIME, false, server);
 		rules.set(GameRules.ADVANCE_WEATHER, false, server);
@@ -212,9 +272,10 @@ public final class HqWorld {
 		rules.set(GameRules.RESPAWN_RADIUS, 0, server);
 		rules.set(GameRules.LOCATOR_BAR, false, server);
 		rules.set(GameRules.COMMAND_BLOCK_OUTPUT, false, server);
-		rules.set(GameRules.LOG_ADMIN_COMMANDS, false, server);
+		rules.set(GameRules.LOG_ADMIN_COMMANDS, logAdminCommands, server);
 		// Allow large /fill operations for the HQ builder.
 		rules.set(GameRules.MAX_BLOCK_MODIFICATIONS, 1_000_000, server);
+		return STUDIO_RULES.length; // world_rules_applied reports it
 	}
 
 	private static <T> void resetToDefault(GameRules rules, GameRules vanilla, GameRule<T> rule, MinecraftServer server) {

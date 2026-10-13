@@ -10,8 +10,10 @@ import dev.agentcraft.client.ui.Kit;
 import dev.agentcraft.client.ui.TextUtil;
 import dev.agentcraft.client.ui.UiStyle;
 import dev.agentcraft.client.ui.WorldUi;
+import dev.agentcraft.mp.state.PublicEvent;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.SubmitNodeCollector;
@@ -39,7 +41,7 @@ public final class SpeechBubble {
 	private static final int OUT_TICKS = 8;
 
 	/** What is being said. {@code to}: agent id, "user", "all" or null. */
-	public record Line(String text, @Nullable String to, long ts) {
+	public record Line(String text, @Nullable String to, long ts, boolean remote, String ownerName, Map<String, String> publicNames) {
 	}
 
 	/** Laid-out bubble (px): {@code width}/{@code height} of the body, without the tail. */
@@ -57,10 +59,39 @@ public final class SpeechBubble {
 			return;
 		}
 		boolean showing = visible();
-		line = new Line(text, say.to(), say.ts());
+		show(new Line(text, say.to(), say.ts(), false, "", Map.of()), age,
+			duration(text.length()), showing);
+	}
+
+	/** Remote public event: hidden text is represented by an ellipsis but keeps the sender's length timing. */
+	void showRemote(PublicEvent.Say say, String ownerName, Map<String, String> publicNames, int age) {
+		boolean showing = visible();
+		String text;
+		if (say.text() == null) {
+			text = "…";
+		} else {
+			text = say.text().replaceAll("\\s+", " ").trim();
+			if (text.isEmpty()) {
+				return;
+			}
+		}
+		show(new Line(text, say.to(), 0, true, ownerName, Map.copyOf(publicNames)), age,
+			duration(say.length()), showing);
+	}
+
+	static int duration(int characters) {
+		return Math.max(70, Math.min(220, 50 + (int) (characters * 1.15)));
+	}
+
+	int durationTicks() {
+		return end - start;
+	}
+
+	private void show(Line next, int age, int duration, boolean showing) {
+		line = next;
 		layout = null;
 		start = showing ? age - IN_TICKS : age;
-		end = age + Math.max(70, Math.min(220, 50 + (int) (text.length() * 1.15)));
+		end = age + duration;
 	}
 
 	/** Show a say that arrived before this agent existed in the world, with the time already gone by. */
@@ -121,7 +152,7 @@ public final class SpeechBubble {
 	}
 
 	private static Layout build(Font font, Line l) {
-		String prefix = prefix(l.to());
+		String prefix = prefix(l);
 		String all = prefix.isEmpty() ? l.text() : prefix + " " + l.text();
 		List<String> plain = TextUtil.wrapPlain(font, all, MAX_TEXT);
 		if (plain.size() > MAX_LINES) {
@@ -168,6 +199,20 @@ public final class SpeechBubble {
 		ForemanState st = Foreman.state();
 		Protocol.Agent a = st == null ? null : st.agent(to);
 		return "@" + (a != null ? a.name() : to);
+	}
+
+	static String prefix(Line line) {
+		if (!line.remote()) {
+			return prefix(line.to());
+		}
+		String to = line.to();
+		if (to == null || to.equals("all") || to.isEmpty()) {
+			return "";
+		}
+		if (to.equals("user")) {
+			return "@" + (line.ownerName().isBlank() ? "owner" : line.ownerName());
+		}
+		return "@" + line.publicNames().getOrDefault(to, to);
 	}
 
 	private static int toColor(@Nullable String to) {

@@ -11,10 +11,18 @@ import dev.agentcraft.client.dev.DevBridge;
 import dev.agentcraft.client.foreman.Foreman;
 import dev.agentcraft.client.foreman.ForemanState;
 import dev.agentcraft.client.ui.Guard;
+import dev.agentcraft.client.mp.StudioView;
+import dev.agentcraft.client.mp.Studios;
 import dev.agentcraft.client.ui.UiStyle;
 import dev.agentcraft.layout.Anchors;
+import dev.agentcraft.mp.StudioId;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -39,8 +47,12 @@ import net.minecraft.world.level.chunk.LevelChunk;
  */
 public final class HqClientFeature {
 	private static final int SCAN_TICKS = 20;
+	/** Own-studio ambience sources (also what {@code dev.state.hq} reports). */
 	private static final List<BlockPos> waitingLamps = new ArrayList<>();
 	private static final List<BlockPos> openPodiums = new ArrayList<>();
+	/** Remote studios' ambience sources, one list per studio; gated on that studio's online flag. */
+	private static final Map<StudioId, List<BlockPos>> remoteWaitingLamps = new LinkedHashMap<>();
+	private static final Map<StudioId, List<BlockPos>> remoteOpenPodiums = new LinkedHashMap<>();
 	private static final RandomSource RANDOM = RandomSource.create();
 	private static int ticks;
 
@@ -89,16 +101,40 @@ public final class HqClientFeature {
 			scan(level);
 		}
 		ForemanState st = Foreman.state();
-		if (st == null || st.isStale()) {
-			return; // offline: the world keeps its last state, but nothing signals "you are needed"
+		if (st != null && !st.isStale()) {
+			spawnMotes(level, waitingLamps, 0.18f);
+			spawnPodiumMotes(level, openPodiums, 0.25f);
 		}
-		for (BlockPos p : waitingLamps) {
-			if (RANDOM.nextFloat() < 0.18f) {
+		// Remote studios are gated on their own presence, never on the viewer's Foreman: an offline
+		// owner's studio stays quiet even while the viewer's own studio works.
+		for (Map.Entry<StudioId, List<BlockPos>> e : remoteWaitingLamps.entrySet()) {
+			if (online(e.getKey())) {
+				spawnMotes(level, e.getValue(), 0.18f);
+			}
+		}
+		for (Map.Entry<StudioId, List<BlockPos>> e : remoteOpenPodiums.entrySet()) {
+			if (online(e.getKey())) {
+				spawnPodiumMotes(level, e.getValue(), 0.25f);
+			}
+		}
+	}
+
+	private static boolean online(StudioId id) {
+		Optional<StudioView> view = Studios.view(id);
+		return view.isPresent() && view.get().online();
+	}
+
+	private static void spawnMotes(ClientLevel level, List<BlockPos> lamps, float chance) {
+		for (BlockPos p : lamps) {
+			if (RANDOM.nextFloat() < chance) {
 				motes(level, p, 0.55f);
 			}
 		}
-		for (BlockPos p : openPodiums) {
-			if (RANDOM.nextFloat() < 0.25f) {
+	}
+
+	private static void spawnPodiumMotes(ClientLevel level, List<BlockPos> podiums, float chance) {
+		for (BlockPos p : podiums) {
+			if (RANDOM.nextFloat() < chance) {
 				level.addParticle(new DustParticleOptions(UiStyle.CLAY & 0xFFFFFF, 0.7f), p.getX() + 0.2 + RANDOM.nextDouble() * 0.6,
 					p.getY() + 1.05, p.getZ() + 0.2 + RANDOM.nextDouble() * 0.6, 0, 0.02, 0);
 			}
@@ -123,26 +159,58 @@ public final class HqClientFeature {
 		level.addParticle(new DustParticleOptions(UiStyle.CLAY & 0xFFFFFF, size), x, y, z, 0, 0.015, 0);
 	}
 
+	/**
+	 * Collect the ambience sources of every studio in range. A station belongs to the studio
+	 * {@link Studios#at} resolves for it, so under the singleplayer overlay the own area feeds the
+	 * remote studio, exactly as its renderer does. Each studio's bounds stay small; a position is
+	 * visited once even when two views (own + overlay) share bounds.
+	 */
 	private static void scan(ClientLevel level) {
 		waitingLamps.clear();
 		openPodiums.clear();
-		Anchors.Layout l = Anchors.current();
-		if (l.bounds() == null) {
-			return;
-		}
-		Anchors.Bounds b = l.bounds();
-		for (int cx = (b.minX() - 3) >> 4; cx <= (b.maxX() + 3) >> 4; cx++) {
-			for (int cz = (b.minZ() - 3) >> 4; cz <= (b.maxZ() + 3) >> 4; cz++) {
-				LevelChunk chunk = level.getChunkSource().getChunkNow(cx, cz);
-				if (chunk == null) {
-					continue;
-				}
-				for (BlockEntity be : chunk.getBlockEntities().values()) {
-					BlockState s = be.getBlockState();
-					if (be instanceof StatusLampBlockEntity && s.getBlock() instanceof StatusLampBlock && s.getValue(StatusLampBlock.STATUS) == LampStatus.WAITING) {
-						waitingLamps.add(be.getBlockPos());
-					} else if (be instanceof DecisionPodiumBlockEntity && s.getBlock() instanceof DecisionPodiumBlock && s.getValue(DecisionPodiumBlock.OPEN)) {
-						openPodiums.add(be.getBlockPos());
+		remoteWaitingLamps.clear();
+		remoteOpenPodiums.clear();
+		Set<Long> seen = new HashSet<>();
+		for (StudioView view : Studios.all()) {
+			Anchors.Bounds b = view.layout().bounds();
+			if (b == null) {
+				continue;
+			}
+			for (int cx = (b.minX() - 3) >> 4; cx <= (b.maxX() + 3) >> 4; cx++) {
+				for (int cz = (b.minZ() - 3) >> 4; cz <= (b.maxZ() + 3) >> 4; cz++) {
+					LevelChunk chunk = level.getChunkSource().getChunkNow(cx, cz);
+					if (chunk == null) {
+						continue;
+					}
+					for (BlockEntity be : chunk.getBlockEntities().values()) {
+						BlockState s = be.getBlockState();
+						boolean waiting = be instanceof StatusLampBlockEntity && s.getBlock() instanceof StatusLampBlock
+							&& s.getValue(StatusLampBlock.STATUS) == LampStatus.WAITING;
+						boolean open = be instanceof DecisionPodiumBlockEntity && s.getBlock() instanceof DecisionPodiumBlock
+							&& s.getValue(DecisionPodiumBlock.OPEN);
+						if (!waiting && !open) {
+							continue;
+						}
+						BlockPos p = be.getBlockPos();
+						if (!seen.add(p.asLong())) {
+							continue;
+						}
+						StudioView owner = Studios.at(p).orElse(view);
+						if (owner.own()) {
+							if (waiting) {
+								waitingLamps.add(p);
+							}
+							if (open) {
+								openPodiums.add(p);
+							}
+						} else {
+							if (waiting) {
+								remoteWaitingLamps.computeIfAbsent(owner.id(), k -> new ArrayList<>()).add(p);
+							}
+							if (open) {
+								remoteOpenPodiums.computeIfAbsent(owner.id(), k -> new ArrayList<>()).add(p);
+							}
+						}
 					}
 				}
 			}

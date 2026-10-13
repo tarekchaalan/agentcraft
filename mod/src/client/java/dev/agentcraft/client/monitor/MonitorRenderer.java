@@ -5,11 +5,14 @@ import dev.agentcraft.block.MonitorBlock;
 import dev.agentcraft.block.entity.MonitorBlockEntity;
 import dev.agentcraft.client.foreman.Foreman;
 import dev.agentcraft.client.foreman.ForemanState;
+import dev.agentcraft.client.mp.StudioView;
 import dev.agentcraft.client.ui.UiStyle;
 import dev.agentcraft.client.ui.WorldUi;
 import dev.agentcraft.client.world.StationRenderState;
 import dev.agentcraft.client.world.StationRenderer;
+import dev.agentcraft.layout.Anchors;
 import java.util.List;
+import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.SubmitNodeCollector;
@@ -79,18 +82,32 @@ public class MonitorRenderer extends StationRenderer<MonitorBlockEntity, Monitor
 			return;
 		}
 		long now = System.nanoTime();
-		ForemanState fs = Foreman.state();
-		String agent = MonitorFeature.resolveAgent(be, s.binding, s.facing, s.panelWidth, s.panelHeight);
 		ScreenStyle st = MonitorFeature.styleFor(be.getBlockPos());
 		int ppb = density(s.panelWidth, s.panelHeight);
 		MonitorScreen m = MonitorFeature.screen(be.getBlockPos());
 		m.lastUsedNanos = now;
-		if (m.sync(fs, agent, st, ppb, s.panelWidth, s.panelHeight, MonitorFeature.logSeq(agent), MonitorFeature.agentSeq(agent), now)) {
-			DisplayStats.rebuilt(DisplayStats.Kind.MONITOR);
+		Optional<StudioView> at = StudioDisplays.at(be.getBlockPos());
+		if (at.isPresent() && !at.get().own()) {
+			// remote studio: the public state only, never the viewer's Foreman, logs, diffs or paths
+			StudioView v = at.get();
+			String agent = MonitorFeature.resolveAgent(be, s.binding, v.layout(), s.facing, s.panelWidth, s.panelHeight);
+			if (m.syncRemoteSource(v, agent, st, ppb, s.panelWidth, s.panelHeight)) {
+				DisplayStats.rebuilt(DisplayStats.Kind.MONITOR);
+			}
+			RemoteMonitorView view = m.remoteView;
+			s.screen = m;
+			s.shift = m.shift(now);
+			s.stale = view != null && !view.online() && view.kind() != RemoteMonitorView.Kind.NO_STUDIO;
+		} else {
+			ForemanState fs = Foreman.state();
+			String agent = MonitorFeature.resolveAgent(be, s.binding, Anchors.current(), s.facing, s.panelWidth, s.panelHeight);
+			if (m.sync(fs, agent, st, ppb, s.panelWidth, s.panelHeight, MonitorFeature.logSeq(agent), MonitorFeature.agentSeq(agent), now)) {
+				DisplayStats.rebuilt(DisplayStats.Kind.MONITOR);
+			}
+			s.screen = m;
+			s.shift = m.shift(now);
+			s.stale = fs != null && fs.hasData() && fs.isStale();
 		}
-		s.screen = m;
-		s.shift = m.shift(now);
-		s.stale = fs != null && fs.hasData() && fs.isStale();
 		long ms = now / 1_000_000L;
 		s.caretOn = (ms / UiStyle.metric("metrics.caret_blink_ms", 500)) % 2 == 0;
 		int pulseMs = UiStyle.metric("metrics.pulse_ms", 1200);

@@ -184,7 +184,7 @@ run") is a normal world. The builder places the same studio into it:
   below its surface. The natural box reaches 16 below the meadow (`NATURAL_SITE`), so a dip under the
   site is filled, not roofed over. Natural trees inside the box are replaced by the plan's; a tree
   straddling the kept band loses its inner half.
-- **Survival extras** (`Options.survival`, also used by `AGENTCRAFT_HQ_ANYWORLD` builds):
+- **Survival extras** (`Options.survival`, also used by `AGENTCRAFT_HQ_ANYWORLD` builds in a natural world):
   - the entrance (z=24) gets two dark oak doors on a timber mullion with a glazed transom (one block
     outside the agents' bounds, so no agent path crosses them);
   - two **back doors** in the north wall: at x 18 (the free cell between the last desk cabinet and

@@ -400,8 +400,11 @@ starts. `/agentcraft hq [builder]` runs an `hq.HqBuilder`, publishes its anchors
 spawn to `spawn`. Because it rewrites terrain and moves the spawn, it only builds in the AgentCraft
 worlds ("AgentCraft HQ" at the origin; "AgentCraft Survival" on the world's HQ site, see FEATURES.md
 "The HQ in a natural world"; opt in elsewhere with `-Dagentcraft.hq.anyworld=1` /
-`AGENTCRAFT_HQ_ANYWORLD=1`, which builds like survival) and never in a
-Hardcore world; a Hardcore world is never treated as an AgentCraft world, and the DevBridge refuses every
+`AGENTCRAFT_HQ_ANYWORLD=1`, which builds like survival in a natural world and like the studio, at the
+origin, in a superflat one such as the game-test world) and never in a Hardcore world. On a
+multiplayer server (`config/agentcraft-server.json` `enabled`) it builds the caller's own plot
+instead: the same studio translated to the plot's origin (`HqBuilder.Options.origin`, see
+docs/multiplayer/); a Hardcore world is never treated as an AgentCraft world, and the DevBridge refuses every
 request but `dev.help` while one is loaded. The Phase 2 builder `test` (`hq.TestRoomBuilder`) is a temporary 25x25 walled
 room: a desk island with six monitors (north), library shelves and the task wall (west), terminals
 and merge stations (east), a meeting table and the goal atrium (centre), the podium with user spots,

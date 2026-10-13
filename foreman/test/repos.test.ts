@@ -290,6 +290,40 @@ describe('parseTestOutput', () => {
     const out = parseTestOutput('✔ a (0.27ms)\n✖ b (0.08ms)\nℹ tests 2\nℹ suites 0\nℹ pass 1\nℹ fail 1\n\n✖ failing tests:\n\ntest at t.test.mjs:3:1\n✖ b (0.08ms)\n  Error: x\n');
     expect(out).toEqual({ failures: ['b'], summary: 'tests 2, pass 1, fail 1' });
   });
+
+  it('reads summaries from TAP and spec-reporter lines', () => {
+    for (const prefix of ['#', 'ℹ']) {
+      expect(parseTestOutput(`${prefix} tests 10\n${prefix} pass 10\n${prefix} fail 0\n`).summary).toBe('tests 10, pass 10, fail 0');
+    }
+  });
+
+  // Reporter excerpts captured on Node 24.18.0 from the sim's failing TAGS_V1 tests.
+  it.each([
+    ['spec', `✖ parseTags keeps hyphenated tags (0.446ms)
+✖ a # inside a word is not a tag (0.092ms)
+✖ hasTag accepts the tag with or without # (0.093458ms)
+ℹ tests 15
+ℹ pass 12
+ℹ fail 3
+✖ failing tests:
+✖ parseTags keeps hyphenated tags (0.446ms)
+✖ a # inside a word is not a tag (0.092ms)
+✖ hasTag accepts the tag with or without # (0.093458ms)
+`],
+    ['TAP', String.raw`not ok 12 - parseTags keeps hyphenated tags
+not ok 14 - a \# inside a word is not a tag
+not ok 15 - hasTag accepts the tag with or without \#
+# tests 15
+# pass 12
+# fail 3
+`],
+  ])('reads exact failing test names from %s output', (_reporter, output) => {
+    expect(parseTestOutput(output).failures).toEqual([
+      'parseTags keeps hyphenated tags',
+      'a # inside a word is not a tag',
+      'hasTag accepts the tag with or without #',
+    ]);
+  });
 });
 
 describe('approved merges are made as the user', () => {

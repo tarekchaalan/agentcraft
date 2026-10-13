@@ -6,6 +6,7 @@ import dev.agentcraft.client.foreman.Foreman;
 import dev.agentcraft.client.foreman.ForemanState;
 import dev.agentcraft.client.foreman.Protocol;
 import dev.agentcraft.client.foreman.Protocol.MemoryEntry;
+import dev.agentcraft.mp.state.PublicStudioState;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -29,6 +30,22 @@ public final class MemoryIndex {
 	private static boolean seenInitialised;
 
 	private MemoryIndex() {
+	}
+
+	/** A remote archive's plate label: a closed shelf, never a scope or note title. */
+	public static final String REMOTE_LABEL = "Archive";
+
+	/**
+	 * The visitor look of the archive: a closed shelf with no note titles, no count and no unread
+	 * mark. {@link PublicStudioState} carries no memory data at all, so this is always true; the
+	 * renderer uses it to pick the neutral plate instead of the viewer's shelves.
+	 */
+	public record RemoteArchive(String label, boolean countShown, boolean fresh) {
+	}
+
+	/** The closed-shelf model for a remote studio ({@code state} is unused: there are no public notes). */
+	public static RemoteArchive remoteArchive(@Nullable PublicStudioState state) {
+		return new RemoteArchive(REMOTE_LABEL, false, false);
 	}
 
 	/** Wire the unread model: notes that exist at the first snapshot of the session count as read. */

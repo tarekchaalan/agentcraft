@@ -3,8 +3,10 @@ package dev.agentcraft.client.world;
 import com.google.gson.JsonObject;
 import dev.agentcraft.client.dev.DevBridge;
 import dev.agentcraft.client.dev.Fields;
+import dev.agentcraft.client.mp.dev.MpDevCommands;
 import dev.agentcraft.layout.Anchor;
 import dev.agentcraft.layout.Anchors;
+import dev.agentcraft.mp.StudioId;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -18,12 +20,16 @@ public final class AnchorsDev {
 
 	public static void init() {
 		DevBridge.register("dev.anchors", 5_000,
-			"{prefix?} -> {layout, revision, bounds, anchors:{name:{x,y,z,yaw,pitch}}}. cam_* = eye position + view; others = feet/surface"
-				+ " (see AnchorNames). Use with dev.camera {anchor}",
+			"{prefix?, studio?} -> {studio, layout, revision, bounds, anchors:{name:{x,y,z,yaw,pitch}}}. cam_* = eye position + view; others = feet/surface"
+				+ " (see AnchorNames). Use with dev.camera {anchor}. studio is a UUID or 'own' (default)",
 			(req, mc) -> {
-				String prefix = Fields.of(req).optStr("prefix", "");
-				Anchors.Layout layout = Anchors.current();
+				Fields f = Fields.of(req);
+				String prefix = f.optStr("prefix", "");
+				// MP-12: resolve through Anchors.forStudio so a named studio reads its own layout.
+				StudioId studio = MpDevCommands.resolveStudio(f.optStr("studio", null));
+				Anchors.Layout layout = Anchors.forStudio(studio);
 				JsonObject o = new JsonObject();
+				o.addProperty("studio", studio.owner().toString());
 				o.addProperty("layout", layout.name());
 				o.addProperty("revision", layout.revision());
 				JsonObject full = Anchors.toJson(layout);

@@ -14,6 +14,7 @@ import dev.agentcraft.client.foreman.Protocol.Agent;
 import dev.agentcraft.client.foreman.Protocol.Task;
 import dev.agentcraft.client.foreman.Protocol.TaskStatus;
 import dev.agentcraft.client.ui.Guard;
+import dev.agentcraft.client.monitor.StudioDisplays;
 import dev.agentcraft.client.world.StationInteractions;
 import dev.agentcraft.client.world.StationRenderer;
 import java.util.HashMap;
@@ -52,6 +53,7 @@ public final class TaskWallFeature {
 	/** Bumps on agent changes the cards show (names, live state dots): boards refresh card contents. */
 	private static long agentSeq;
 	private static final Map<BlockPos, TaskBoard> BOARDS = new HashMap<>();
+	private static final Map<BlockPos, RemoteBoard> REMOTE_BOARDS = new HashMap<>();
 	private static @Nullable String selected;
 	private static String startHint = "";
 	private static long startHintAt;
@@ -60,6 +62,7 @@ public final class TaskWallFeature {
 	}
 
 	public static void init() {
+		StudioDisplays.init();
 		BlockEntityRenderers.register(ModBlockEntities.TASK_BOARD, ctx -> new TaskBoardRenderer());
 		Foreman.addListener(new ForemanListener() {
 			@Override
@@ -90,6 +93,12 @@ public final class TaskWallFeature {
 			while (it.hasNext()) {
 				if (now - it.next().lastUsedNanos > 30_000_000_000L) {
 					it.remove();
+				}
+			}
+			Iterator<RemoteBoard> rit = REMOTE_BOARDS.values().iterator();
+			while (rit.hasNext()) {
+				if (now - rit.next().lastUsedNanos > 30_000_000_000L) {
+					rit.remove();
 				}
 			}
 		}));
@@ -147,6 +156,7 @@ public final class TaskWallFeature {
 						o.add("aim", aimJson(mc, aim, onBoard));
 					}
 					o.add("boards", boardsJson());
+					o.add("remoteBoards", remoteBoardsJson());
 					return o;
 				});
 			});
@@ -193,6 +203,10 @@ public final class TaskWallFeature {
 		if (!st.is(ModBlocks.TASK_BOARD)) {
 			return false;
 		}
+		var at = StudioDisplays.at(pos);
+		if (at.isPresent() && !at.get().own()) {
+			return false; // a remote board's cards are not the viewer's own; MP-11 owns visitor routing
+		}
 		BlockPos origin = PanelBlock.origin(mc.level, pos, st);
 		TaskBoard b = BOARDS.get(origin);
 		if (b == null || b.ppb == 0) {
@@ -204,6 +218,10 @@ public final class TaskWallFeature {
 
 	static TaskBoard board(BlockPos origin) {
 		return BOARDS.computeIfAbsent(origin.immutable(), TaskBoard::new);
+	}
+
+	static RemoteBoard remoteBoard(BlockPos origin) {
+		return REMOTE_BOARDS.computeIfAbsent(origin.immutable(), RemoteBoard::new);
 	}
 
 	/** The task the 'task' screen opens with: the last one opened, else the first doing (or blocked) one, else the first. */
@@ -247,6 +265,10 @@ public final class TaskWallFeature {
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.level == null || !(state.getBlock() instanceof PanelBlock)) {
 			return null;
+		}
+		var at = StudioDisplays.at(pos);
+		if (at.isPresent() && !at.get().own()) {
+			return null; // never open the viewer's TaskScreen for a remote board's card
 		}
 		BlockPos origin = PanelBlock.origin(mc.level, pos, state);
 		TaskBoard b = BOARDS.get(origin);
@@ -355,6 +377,33 @@ public final class TaskWallFeature {
 				cards.add(cj);
 			}
 			j.add("cards", cards);
+			arr.add(j);
+		}
+		return arr;
+	}
+
+	/** Remote boards in {@code dev.taskwall}: counts and title cards only, never own task content. */
+	private static JsonArray remoteBoardsJson() {
+		JsonArray arr = new JsonArray();
+		for (RemoteBoard b : REMOTE_BOARDS.values()) {
+			JsonObject j = new JsonObject();
+			j.addProperty("origin", b.origin.getX() + " " + b.origin.getY() + " " + b.origin.getZ());
+			j.addProperty("size", b.panelW + "x" + b.panelH);
+			j.addProperty("ppb", b.ppb);
+			j.addProperty("remote", true);
+			j.addProperty("present", b.view != null && b.view.present());
+			j.addProperty("online", b.view != null && b.view.online());
+			j.addProperty("cards", b.cards.size());
+			j.addProperty("layoutUs", b.layoutNanos / 1000);
+			j.addProperty("ageMs", (System.nanoTime() - b.lastUsedNanos) / 1_000_000L);
+			JsonObject cols = new JsonObject();
+			for (TaskBoard.Column c : b.columns) {
+				JsonObject cj = new JsonObject();
+				cj.addProperty("count", c.count);
+				cj.addProperty("blocked", c.blocked);
+				cols.add(c.col.name().toLowerCase(java.util.Locale.ROOT), cj);
+			}
+			j.add("columns", cols);
 			arr.add(j);
 		}
 		return arr;

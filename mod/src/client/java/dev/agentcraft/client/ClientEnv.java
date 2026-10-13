@@ -31,14 +31,56 @@ public final class ClientEnv {
 	private ClientEnv() {
 	}
 
-	/** True in {@code gradlew runClient}; false for a jar in a normal launcher. */
-	public static final boolean DEV_RUN = FabricLoader.getInstance().isDevelopmentEnvironment();
+	/** True in {@code gradlew runClient}; false for a jar in a normal launcher (and outside the Fabric launcher, e.g. in unit tests). */
+	public static final boolean DEV_RUN = devRun();
+
+	private static boolean devRun() {
+		try {
+			return FabricLoader.getInstance().isDevelopmentEnvironment();
+		} catch (Throwable t) {
+			return false; // no Fabric launcher: a plain JVM (the mod's unit tests)
+		}
+	}
 
 	public static final int DEV_PORT = intValue("AGENTCRAFT_DEV_PORT", 7879);
 	public static final boolean DEV_BRIDGE = flag("AGENTCRAFT_DEV", DEV_RUN);
 	public static final boolean MUTE = flag("AGENTCRAFT_MUTE", DEV_RUN);
 	public static final boolean TAKE_FOCUS = flag("AGENTCRAFT_FOCUS", !DEV_RUN);
 	public static final boolean AUTO_WORLD = flag("AGENTCRAFT_AUTOWORLD", DEV_RUN);
+
+	/**
+	 * True when this client was launched with {@code --quickPlayMultiplayer <address>}. The launch
+	 * arguments come from Fabric Loader (sanitized); they are never logged, and the parser is a pure
+	 * function so it can be unit-tested without a client. A launcher that hides its arguments must
+	 * never break startup, so a failure returns false.
+	 */
+	public static boolean quickPlayMultiplayer() {
+		try {
+			return quickPlayMultiplayer(FabricLoader.getInstance().getLaunchArguments(true));
+		} catch (Throwable t) {
+			return false;
+		}
+	}
+
+	/** Pure parser seam: only the exact multiplayer quick-play option with a nonblank value counts. */
+	public static boolean quickPlayMultiplayer(String[] args) {
+		if (args == null) {
+			return false;
+		}
+		for (int i = 0; i < args.length; i++) {
+			String arg = args[i];
+			if (arg == null) {
+				continue;
+			}
+			if (arg.equals("--quickPlayMultiplayer")) {
+				return i + 1 < args.length && args[i + 1] != null && !args[i + 1].isBlank();
+			}
+			if (arg.startsWith("--quickPlayMultiplayer=")) {
+				return !arg.substring("--quickPlayMultiplayer=".length()).isBlank();
+			}
+		}
+		return false;
+	}
 
 	public static String raw(String envName) {
 		String prop = System.getProperty(envName.toLowerCase(Locale.ROOT).replace('_', '.'));

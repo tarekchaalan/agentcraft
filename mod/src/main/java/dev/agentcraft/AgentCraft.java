@@ -8,6 +8,16 @@ import dev.agentcraft.entity.ModEntities;
 import dev.agentcraft.hq.HqFeature;
 import dev.agentcraft.layout.Anchors;
 import dev.agentcraft.world.HqWorld;
+import dev.agentcraft.mp.MpServerConfig;
+import dev.agentcraft.mp.net.MpPayloads;
+import dev.agentcraft.mp.server.StudioRange;
+import dev.agentcraft.mp.server.world.ServerWorldFeature;
+import dev.agentcraft.mp.server.plot.PlotFeature;
+import dev.agentcraft.mp.server.layout.LayoutSyncFeature;
+import dev.agentcraft.mp.server.relay.RelayFeature;
+import dev.agentcraft.mp.server.intent.WorldIntentFeature;
+import dev.agentcraft.mp.server.protect.PlotProtectionFeature;
+
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.resources.Identifier;
 import org.slf4j.Logger;
@@ -24,6 +34,15 @@ public class AgentCraft implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
+		MpServerConfig.init();
+		MpPayloads.register();
+		StudioRange.init();
+		ServerWorldFeature.init();
+		PlotFeature.init();
+		LayoutSyncFeature.init();
+		RelayFeature.init();
+		WorldIntentFeature.init();
+		PlotProtectionFeature.init();
 		ModBlocks.init();
 		ModBlockEntities.init();
 		ModItems.init();

@@ -12,10 +12,19 @@ import dev.agentcraft.block.PanelBlock;
 import dev.agentcraft.block.StatusLampBlock;
 import dev.agentcraft.layout.AnchorNames;
 import dev.agentcraft.layout.Anchors;
+import dev.agentcraft.mp.MpEvents;
+import dev.agentcraft.mp.MpLog;
+import dev.agentcraft.mp.MpReasons;
+import dev.agentcraft.mp.Plot;
+import dev.agentcraft.mp.Plots;
+import dev.agentcraft.mp.StudioId;
 import dev.agentcraft.world.HqSite;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -191,13 +200,35 @@ public final class StudioHqBuilder implements HqBuilder {
 	@Override
 	public @Nullable String build(ServerLevel level, Anchors.Builder a, Options options) {
 		long t0 = System.nanoTime();
-		// the plan is drawn at the design origin (ground y=64) and placed at the world's HQ site:
-		// the origin itself in the studio meadow, the chosen flat ground near the spawn in a natural world
+		StudioId studio = options.studio();
+		Optional<Plot> plot = Plots.directory().plotOf(studio);
+		String refusal = refusalReason(options, plot);
+		if (refusal != null) {
+			logPlotBuildFailed(studio, plot, refusal);
+			throw new IllegalArgumentException("studio build refused: " + refusal);
+		}
+		try {
+			return buildBody(level, a, options, plot, t0);
+		} catch (UncheckedIOException e) {
+			logPlotBuildFailed(studio, plot, MpReasons.IO_ERROR);
+			throw e;
+		} catch (RuntimeException e) {
+			logPlotBuildFailed(studio, plot, MpReasons.BUILD_ERROR);
+			throw e;
+		}
+	}
+
+	private @Nullable String buildBody(ServerLevel level, Anchors.Builder a, Options options, Optional<Plot> plot, long t0) {
+		StudioId studio = options.studio();
+		// the plan is drawn at the design origin (ground y=64) and placed where this studio stands: the
+		// origin itself in the studio meadow, a plot origin on a multiplayer server (the same meadow,
+		// translated), the chosen flat ground near the spawn in a natural world
 		HqSite site = options.site();
 		boolean natural = site != null;
-		int ox = natural ? site.x() : 0;
-		int oy = natural ? site.y() - GROUND : 0;
-		int oz = natural ? site.z() : 0;
+		BlockPos origin = options.origin();
+		int ox = natural ? site.x() : origin.getX();
+		int oy = natural ? site.y() - GROUND : origin.getY();
+		int oz = natural ? site.z() : origin.getZ();
 		int[] box = natural ? NATURAL_SITE : SITE;
 		if (options.survival()) {
 			box = new int[] {box[0] - LIGHT_MARGIN, box[1], box[2] - LIGHT_MARGIN, box[3] + LIGHT_MARGIN, box[4], box[5] + LIGHT_MARGIN};
@@ -242,16 +273,24 @@ public final class StudioHqBuilder implements HqBuilder {
 		p.settleGrass();
 		long tPlan = System.nanoTime() - tPlan0;
 		int[] worldBox = p.worldBox();
-		BlockState[] previous = PlanStore.load(level.getServer(), ID, worldBox, p.size());
+		BlockState[] previous = PlanStore.load(level.getServer(), studio, ID, worldBox, p.size());
 		Plan.Stats st = p.apply(level, previous, options.force());
-		PlanStore.save(level.getServer(), ID, worldBox, p.cells());
+		try {
+			PlanStore.save(level.getServer(), studio, ID, worldBox, p.cells());
+		} catch (IOException e) {
+			if (studio.equals(StudioId.LOCAL)) {
+				AgentCraft.LOGGER.warn("Could not save HQ plan for LOCAL", e);
+			} else {
+				throw new UncheckedIOException(e);
+			}
+		}
 		int stocked = options.survival() ? stockPens(level, p) : 0;
 		a.bounds(-HX + 1, FLOOR, HZN + 1, HX - 1, FLOOR + 16, AZ + 8);
 		a.spot(AnchorNames.ENTRANCE, AX, FEET, AZ + 7, 180);
 		a.put(AnchorNames.SPAWN, AX + 0.5, FEET, AZ + 7.5, 180, 0);
 		AgentCraft.LOGGER.info(
 			"Studio HQ at {}{}: terrain read in {} ms, planned in {} ms, applied {} cells in {} ms ({} changed, {} connections, {} bindings, {} kept, {} foreign replaced, {} drops removed, previous plan {}); total {} ms",
-			HqTerrain.describe(site), options.survival() ? " (survival)" : "", tSample / 1_000_000,
+			natural || origin.equals(BlockPos.ZERO) ? HqTerrain.describe(site) : "plot origin " + origin.toShortString() + " (flat meadow)", options.survival() ? " (survival)" : "", tSample / 1_000_000,
 			tPlan / 1_000_000, st.cells(), st.micros() / 1000, st.changed(), st.connected(), st.bound(), st.kept(), st.foreign(), st.items(),
 			previous == null ? "none" : "known", (System.nanoTime() - t0) / 1_000_000);
 		if (st.changed() + st.connected() < 40 && !st.sample().isEmpty()) {
@@ -275,7 +314,45 @@ public final class StudioHqBuilder implements HqBuilder {
 		if (stocked > 0) {
 			r.append(String.format(Locale.ROOT, "; put %d animal%s in the pens", stocked, stocked == 1 ? "" : "s"));
 		}
+		if (!studio.equals(StudioId.LOCAL)) {
+			MpLog.event(MpEvents.PLOT_BUILT, "studio", studio.owner(), "plot", plot.orElseThrow().index(), "ms", (System.nanoTime() - t0) / 1_000_000,
+				"changed", st.changed() + st.connected(), "kept", st.kept());
+		}
 		return r.toString();
+	}
+
+	/**
+	 * Refusal reason, or null when the build may proceed. {@link StudioId#LOCAL} builds at
+	 * {@link BlockPos#ZERO} (a natural world moves it with the site, not the origin); a plot builds the
+	 * meadow at exactly its own origin, never on a natural site.
+	 */
+	private static @Nullable String refusalReason(Options options, Optional<Plot> plot) {
+		StudioId studio = options.studio();
+		BlockPos origin = options.origin();
+		if ((origin.getX() & 15) != 0 || (origin.getZ() & 15) != 0) {
+			return MpReasons.BAD_ORIGIN;
+		}
+		if (studio.equals(StudioId.LOCAL)) {
+			return origin.equals(BlockPos.ZERO) ? null : MpReasons.BAD_ORIGIN;
+		}
+		if (plot.isEmpty()) {
+			return MpReasons.NO_PLOT;
+		}
+		if (options.site() != null) {
+			return MpReasons.BAD_ORIGIN;
+		}
+		return plot.get().origin().equals(origin) ? null : MpReasons.BAD_ORIGIN;
+	}
+
+	private static void logPlotBuildFailed(StudioId studio, Optional<Plot> plot, String reason) {
+		if (studio.equals(StudioId.LOCAL)) {
+			return;
+		}
+		if (plot.isPresent()) {
+			MpLog.event(MpEvents.PLOT_BUILD_FAILED, "studio", studio.owner(), "plot", plot.get().index(), "reason", reason);
+		} else {
+			MpLog.event(MpEvents.PLOT_BUILD_FAILED, "studio", studio.owner(), "reason", reason);
+		}
 	}
 
 	/** Desk bay owners, west to east (see {@link #DESK_ORDER}). */

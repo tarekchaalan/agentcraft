@@ -1,7 +1,10 @@
 package dev.agentcraft.hq;
 
 import dev.agentcraft.layout.Anchors;
+import dev.agentcraft.mp.StudioId;
 import dev.agentcraft.world.HqSite;
+import java.util.Objects;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import org.jspecify.annotations.Nullable;
 
@@ -33,12 +36,32 @@ public interface HqBuilder {
 	 *     the origin (builders that cannot move ignore it).
 	 * @param survival the world is played in survival: builders add what that needs (doors, a bed and
 	 *     tools, lighting that keeps mobs from spawning on the site).
+	 * @param origin where the studio meadow is built when there is no {@code site}: {@link BlockPos#ZERO}
+	 *     in singleplayer, a plot's origin on a multiplayer server (x and z multiples of 16). A plot is
+	 *     just another place for the plan: the same build, translated.
+	 * @param studio whose studio this is: {@link StudioId#LOCAL} in singleplayer (its plan file is the
+	 *     world's), a plot owner on a multiplayer server (each plot keeps its own plan file).
 	 */
-	record Options(boolean force, @Nullable HqSite site, boolean survival) {
-		public static final Options DEFAULT = new Options(false, null, false);
+	record Options(boolean force, @Nullable HqSite site, boolean survival, BlockPos origin, StudioId studio) {
+		public Options {
+			origin = origin.immutable();
+			Objects.requireNonNull(studio);
+		}
+
+		public static final Options DEFAULT = new Options(false);
 
 		public Options(boolean force) {
 			this(force, null, false);
+		}
+
+		/** Singleplayer: the studio meadow at the origin ({@code site} null), or a natural world's site. */
+		public Options(boolean force, @Nullable HqSite site, boolean survival) {
+			this(force, site, survival, BlockPos.ZERO, StudioId.LOCAL);
+		}
+
+		/** A multiplayer plot: the studio meadow at the plot's origin, owned by {@code studio}. */
+		public Options(boolean force, BlockPos origin, StudioId studio) {
+			this(force, null, false, origin, studio);
 		}
 	}
 

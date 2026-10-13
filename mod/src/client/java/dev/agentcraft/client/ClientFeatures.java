@@ -14,6 +14,14 @@ import dev.agentcraft.client.permissions.PermissionsFeature;
 import dev.agentcraft.client.taskwall.TaskWallFeature;
 import dev.agentcraft.client.world.AnchorsDev;
 import dev.agentcraft.client.world.ItemsDev;
+import dev.agentcraft.client.mp.Studios;
+import dev.agentcraft.client.mp.MpMode;
+import dev.agentcraft.client.mp.dev.MpDevFake;
+import dev.agentcraft.client.mp.layout.LayoutSyncClient;
+import dev.agentcraft.client.mp.publish.PublishFeature;
+import dev.agentcraft.client.mp.remote.RemoteStudiosFeature;
+import dev.agentcraft.client.mp.visitor.VisitorFeature;
+
 
 /**
  * The one place that wires every client feature. Each feature lives in its own package with an
@@ -28,6 +36,13 @@ public final class ClientFeatures {
 
 	public static void init() {
 		ForemanFeature.init();   // link + state model (dev.foreman, dev.state.foreman)
+		Studios.init();
+		MpMode.init();
+		MpDevFake.init();
+		LayoutSyncClient.init();
+		PublishFeature.init();
+		RemoteStudiosFeature.init();
+		VisitorFeature.init();
 		AnchorsDev.init();       // dev.anchors, dev.camera {anchor}
 		ItemsDev.init();         // dev.screen creative_agentcraft
 		AgentsFeature.init();    // agent NPCs, nameplates, dev.agents

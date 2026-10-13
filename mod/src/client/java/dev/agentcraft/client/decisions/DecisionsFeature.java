@@ -12,6 +12,7 @@ import dev.agentcraft.client.foreman.ForemanListener;
 import dev.agentcraft.client.foreman.ForemanState;
 import dev.agentcraft.client.foreman.Protocol.Decision;
 import dev.agentcraft.client.foreman.Protocol.DecisionKind;
+import dev.agentcraft.client.hq.HqWorldDriver;
 import dev.agentcraft.client.hud.Keys;
 import dev.agentcraft.client.ui.Guard;
 import dev.agentcraft.client.world.ServerTasks;
@@ -24,7 +25,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderers;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jspecify.annotations.Nullable;
 
@@ -43,8 +43,6 @@ public final class DecisionsFeature {
 	private static final Map<String, Long> ANSWERING = new HashMap<>();
 	/** Last answers sent from this client (for dev.decisions). */
 	private static final Map<String, String> ANSWERS = new HashMap<>();
-	/** Podium block states we asked the server to change (pos -> wanted open), to not repeat. */
-	private static final Map<BlockPos, Boolean> PODIUM_PENDING = new HashMap<>();
 
 	private DecisionsFeature() {
 	}
@@ -117,28 +115,16 @@ public final class DecisionsFeature {
 		return n;
 	}
 
-	/** Called by the podium renderer (client thread) with the podium's state: keep {@code open} in sync. */
+	/** Called by the podium renderer (client thread) with the podium's state: tell the driver what the
+	 * podium should show right now. The renderer's {@code wantOpen} counts only decisions not being
+	 * answered, so it can request closed while {@code compute} still sees an open decision. The
+	 * driver folds this into the same {@code WorldIntent.podiumOpen} and clears it once the computed
+	 * value agrees, so there is one writer. No world write happens here (A-18). */
 	static void syncPodium(BlockPos pos, BlockState state, boolean wantOpen) {
 		if (!state.hasProperty(DecisionPodiumBlock.OPEN)) {
 			return;
 		}
-		boolean is = state.getValue(DecisionPodiumBlock.OPEN);
-		if (is == wantOpen) {
-			PODIUM_PENDING.remove(pos);
-			return;
-		}
-		Boolean pending = PODIUM_PENDING.get(pos);
-		if (pending != null && pending == wantOpen) {
-			return;
-		}
-		BlockPos p = pos.immutable();
-		PODIUM_PENDING.put(p, wantOpen);
-		ServerTasks.run(level -> {
-			BlockState s = level.getBlockState(p);
-			if (s.getBlock() instanceof DecisionPodiumBlock && s.getValue(DecisionPodiumBlock.OPEN) != wantOpen) {
-				level.setBlock(p, s.setValue(DecisionPodiumBlock.OPEN, wantOpen), Block.UPDATE_CLIENTS);
-			}
-		});
+		HqWorldDriver.setPodiumOverride(wantOpen);
 	}
 
 	// ------------------------------------------------------------------ dev

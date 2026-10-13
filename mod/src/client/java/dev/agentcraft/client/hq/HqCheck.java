@@ -4,9 +4,12 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import dev.agentcraft.client.agents.GridPathfinder;
 import dev.agentcraft.client.dev.DevBridge;
+import dev.agentcraft.client.dev.Fields;
+import dev.agentcraft.client.mp.dev.MpDevCommands;
 import dev.agentcraft.layout.Anchor;
 import dev.agentcraft.layout.AnchorNames;
 import dev.agentcraft.layout.Anchors;
+import dev.agentcraft.mp.StudioId;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -47,10 +50,14 @@ final class HqCheck {
 
 	static void register() {
 		DevBridge.register("dev.hq.check", 30_000,
-			"{minLight?} -> HQ reachability (A* from entrance + lounge to every station anchor or its seat's step-in cell), furniture climbing, slot spacing, interior light",
+			"{minLight?, studio?} -> HQ reachability (A* from entrance + lounge to every station anchor or its seat's step-in cell), furniture climbing, slot spacing, interior light"
+				+ " for an optional studio UUID or 'own' (default)",
 			(req, mc) -> {
-				int minLight = req.has("minLight") ? req.get("minLight").getAsInt() : 7;
-				return DevBridge.onClient(mc, () -> check(mc, minLight));
+				Fields f = Fields.of(req);
+				int minLight = f.optInt("minLight", 7, 0, 15);
+				// MP-12: resolve through Anchors.forStudio so a named studio reads its own layout.
+				StudioId studio = MpDevCommands.resolveStudio(f.optStr("studio", null));
+				return DevBridge.onClient(mc, () -> check(mc, minLight, studio));
 			});
 	}
 
@@ -103,14 +110,15 @@ final class HqCheck {
 		return null;
 	}
 
-	static JsonObject check(Minecraft mc, int minLight) {
+	static JsonObject check(Minecraft mc, int minLight, StudioId studio) {
 		JsonObject o = new JsonObject();
 		ClientLevel level = mc.level;
-		Anchors.Layout layout = Anchors.current();
+		Anchors.Layout layout = Anchors.forStudio(studio);
 		if (level == null || layout.isEmpty() || layout.bounds() == null) {
 			o.addProperty("error", "no level or no layout");
 			return o;
 		}
+		o.addProperty("studio", studio.owner().toString());
 		o.addProperty("layout", layout.name());
 		JsonArray failures = new JsonArray();
 		JsonArray climbing = new JsonArray();

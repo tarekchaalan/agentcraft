@@ -19,6 +19,8 @@ import net.minecraft.network.chat.Component;
  * AgentCraftCommands.sub(root -> root.then(Commands.literal("hq").executes(ctx -> ...)));
  * </pre>
  * Built in: {@code /agentcraft anchors} lists the published anchors.
+ * The root is open so {@code plot info} and {@code plot home} work for every player.
+ * Each other subcommand sets its own permission.
  */
 public final class AgentCraftCommands {
 	private static final List<Consumer<LiteralArgumentBuilder<CommandSourceStack>>> SUBS = new CopyOnWriteArrayList<>();
@@ -31,7 +33,7 @@ public final class AgentCraftCommands {
 	}
 
 	public static void init() {
-		sub(root -> root.then(Commands.literal("anchors").executes(ctx -> {
+		sub(root -> root.then(Commands.literal("anchors").requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS)).executes(ctx -> {
 			Anchors.Layout layout = Anchors.current();
 			ctx.getSource().sendSuccess(() -> Component.literal("Layout '" + layout.name() + "' rev " + layout.revision() + ": "
 				+ layout.anchors().size() + " anchors"), false);
@@ -42,7 +44,7 @@ public final class AgentCraftCommands {
 			return layout.anchors().size();
 		})));
 		CommandRegistrationCallback.EVENT.register((dispatcher, buildContext, selection) -> {
-			LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("agentcraft").requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS));
+			LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("agentcraft").requires(Commands.hasPermission(Commands.LEVEL_ALL));
 			for (var s : SUBS) {
 				s.accept(root);
 			}
