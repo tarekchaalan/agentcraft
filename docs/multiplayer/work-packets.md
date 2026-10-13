@@ -1,7 +1,7 @@
 # Multiplayer Work Packets
 
 > Type: how-to. Audience: the coordinator and packet workers.
-> Updated: 2026-10-03 (MP-00 plan). Companions: [campaign README and decisions](README.md), [audit](audit.md), [session resume](handoffs/session-resume.md), [original handoff](handoff-2026-10-03.md).
+> Updated: 2026-10-03 (MP-00 plan). Companions: [campaign README and decisions](README.md), [audit](audit.md), [session resume](https://github.com/SandboxServers/agentcraft/blob/mp/integration/docs/multiplayer/handoffs/session-resume.md), [original handoff](https://github.com/SandboxServers/agentcraft/blob/mp/integration/docs/multiplayer/handoff-2026-10-03.md).
 
 ## Why this shape
 
@@ -632,7 +632,7 @@ Decisions:
 
 ## MP-14: deployment for multiplayer
 
-**Status: BlockedDependency (MP-F).** The release pipeline itself already exists. It landed with the plan, modelled on Cimmeria's (see [deploy.md](deploy.md)):
+**Status: BlockedDependency (MP-F).** The release pipeline itself already exists. It landed with the plan, modelled on Cimmeria's (see [deploy.md](https://github.com/SandboxServers/agentcraft/blob/mp/integration/docs/multiplayer/deploy.md)):
 
 - `deploy/Dockerfile`: Fabric 26.3, Fabric API and the mod, Java 25, non-root, world in `/data`.
 - The entrypoint and backup hook.

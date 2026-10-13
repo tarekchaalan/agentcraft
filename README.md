@@ -10,7 +10,7 @@
 [![Minecraft 26.3](https://img.shields.io/badge/Minecraft-26.3-8fa98b)](https://www.minecraft.net)
 [![Fabric](https://img.shields.io/badge/mod%20loader-Fabric-d97757)](https://fabricmc.net)
 [![Claude Agent SDK](https://img.shields.io/badge/agents-Claude%20Agent%20SDK-2fa3a0)](https://code.claude.com/docs/en/agent-sdk/overview)
-[![Tests](https://img.shields.io/badge/tests-1156-3b2a20)](#development)
+[![Tests](https://img.shields.io/badge/tests-1170-3b2a20)](#development)
 
 <img src="docs/img/readme/hero.jpg" alt="The AgentCraft HQ at golden hour" width="100%">
 
@@ -42,6 +42,7 @@ Everything upstream does still works the same way. On top of it:
 | **Survival world** | A second save, **AgentCraft Survival**: a real generated world with vanilla rules. The HQ is built on the flattest ground near spawn and blended into the terrain, with doors and back doors, a workbench corner, your own bedroom, a crop farm and animal pens, no trees near the farms, and hidden lighting so nothing hostile spawns near the base. Launch with `-World survival` (`--world survival` on macOS and Linux). | |
 | **HQ grounds** | In both worlds: a garden wall with a gate in the lychgate, a glazed conservatory on the west terrace, and the ring path joined to the terrace steps. | |
 | **Guided start for Windows** | Double-click `start-agentcraft.cmd`. It checks git, Node.js 22, Java 25 and your Claude login, offers to install what is missing, then asks for the backend, the repo and the world. | |
+| **Sturdier launchers** | Both launchers check every argument, Node.js 22, Java 25 and the ports before they start anything, find a Java 25 JDK even when `JAVA_HOME` points at an older one, and stop what they started when a launch fails or you press Ctrl+C. Clear exit codes, and the scripts in `tools/` have names that say what they do. | |
 | **The mod starts the Foreman** | No terminal needed. When the game starts and no Foreman answers, the mod starts one in the background (and reuses one that is already running). `/foreman` in the console shows its state, log and controls. | [larattalabs](#credits) |
 | **Login mode hardening** | With your Claude login, an API key, base URL or provider switch left in the shell never reaches the agents. The banner shows the auth mode (`auth ok (claude login)`). Both launchers have a `login` command and check the login before starting. | [NoahBall25](#credits) |
 | **Usage in game** | API spend, or with a claude.ai login your plan windows (5h, 7d, per model) with reset times, in the console header, `/status`, the HUD pill and the feed monitor. | |
@@ -173,6 +174,9 @@ tools\launch.ps1 -Login                                      # sign the agents' 
 tools\launch.ps1 -UseClaudeLogin -Repo C:\path\to\your\repo  # run on your claude login instead of an API key
 tools\stop.ps1                                               # stop everything launch.ps1 started
 ```
+
+The launcher uses `JAVA_HOME` when it is Java 25, else the newest Java 25 JDK it finds in the usual
+install folders, so an older `JAVA_HOME` does not get in the way. `-DryRun` shows what it would start.
 
 ### macOS and Linux
 
@@ -470,7 +474,7 @@ harness is in [tools/README.md](tools/README.md#multiplayer-harness).
 
 ```powershell
 cd foreman; npm test                       # 634 tests
-cd tools; npm test                         # 74 tests
+cd tools; npm test                         # 88 tests
 cd mod; .\gradlew.bat test                 # 332 mod unit tests
 cd mod; .\gradlew.bat build                # the mod, plus 116 Fabric game tests on a headless server
 node tools/run-screenshot-qa.mjs --home .agentcraft-home  # capture the screenshot QA gallery

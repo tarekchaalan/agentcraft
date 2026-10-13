@@ -241,6 +241,9 @@ The bar: every shot >= 8 on every applicable axis from independent judges.
 - `tools\launch.ps1 -Dev ...` is the launcher QA uses (see `tools/README.md`). `-Dev` = muted
   (`AGENTCRAFT_MUTE=1`), no focus stealing (`AGENTCRAFT_FOCUS=0`), Foreman `--no-notify`, Gradle
   daemon idle timeout 30 min, and the home defaults to `<main checkout>/.agentcraft-home`.
+  It checks its arguments, Java 25 and the ports before it starts anything, and when a launch
+  fails it stops what that launch started; its exit code says why (2 arguments, 3 a missing
+  prerequisite, 4 a port in use, 1 anything else). The QA run records it in `launch.log`.
 - `tools\stop.ps1` stops only what `launch.ps1` started (run files in `artifacts/run/` with pid +
   start time): the game via `dev.quit` (world saved), the Foreman via Ctrl+Break into its hidden
   console (state saved, `foreman.json` released), then a force-kill of only those process trees
@@ -265,7 +268,7 @@ The bar: every shot >= 8 on every applicable axis from independent judges.
 ## Testing the tools themselves
 
 ```powershell
-npm test --prefix tools      # node:test: scene runner (fake DevBridge/Foreman), Foreman client (fake WS server), contact sheet
+npm test --prefix tools      # node:test: scene runner (fake DevBridge/Foreman), Foreman client (fake WS server), contact sheet, launcher checks
 node tools/capture-screenshots.mjs tools/scenes/qa-selftest.json --port 7889 --foreman 27878 --prefix selftest/
 ```
 

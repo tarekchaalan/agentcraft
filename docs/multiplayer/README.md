@@ -1,7 +1,9 @@
 # Multiplayer AgentCraft
 
 > Type: how-to. Audience: the Claude Code coordinator, packet workers and the owner.
-> Updated: 2026-10-04 (Wave 1 written and reviewed; see the session resume). Companions: [audit](audit.md), [work packets](work-packets.md), [session resume](handoffs/session-resume.md), [deploy runbook](deploy.md), [MP-00 worknote](worknotes/MP-00.md), [original handoff](handoff-2026-10-03.md).
+> Updated: 2026-10-04 (Wave 1 written and reviewed; see the session resume). Companions here: [audit](audit.md), [work packets](work-packets.md), [player install](player-install.md).
+>
+> This repository took the campaign's code and these three documents. The deploy runbook, the per-packet worknotes, the session resume and the original handoff stayed on the [SandboxServers `mp/integration` branch](https://github.com/SandboxServers/agentcraft/tree/mp/integration/docs/multiplayer): [session resume](https://github.com/SandboxServers/agentcraft/blob/mp/integration/docs/multiplayer/handoffs/session-resume.md), [deploy runbook](https://github.com/SandboxServers/agentcraft/blob/mp/integration/docs/multiplayer/deploy.md), [worknotes](https://github.com/SandboxServers/agentcraft/tree/mp/integration/docs/multiplayer/worknotes), [original handoff](https://github.com/SandboxServers/agentcraft/blob/mp/integration/docs/multiplayer/handoff-2026-10-03.md).
 
 ## Purpose
 
@@ -53,7 +55,7 @@ Proposed defaults are what the campaign builds against. The owner can change any
 2. Confirm D-MP05: should visitors be able to build anywhere, or only outside plots?
 3. Who is on the first whitelist? The colo already runs today's server (as a preview; remote players' agents don't render correctly until the campaign lands, A-13). Players also need the edge to forward TCP 25565 (A-53).
 4. Should the cast's `upstream-sync-steward` open a conversation with upstream about contributing multiplayer later (D-MP04)?
-5. The harness's live up/down cycle on Windows was run on 2026-10-04 (`worknotes/MP-H.md`). Who runs the one `down` on macOS that #4 still owes?
+5. The harness's live up/down cycle on Windows was run on 2026-10-04 ([MP-H worknote](https://github.com/SandboxServers/agentcraft/blob/mp/integration/docs/multiplayer/worknotes/MP-H.md)). Who runs the one `down` on macOS that #4 still owes?
 
 ## Owner rulings from the pull-request review (2026-10-04)
 
@@ -70,13 +72,15 @@ Given by the owner's reviewer on #5, in answer to the questions the review left 
 
 ## Packet status
 
+Worknotes are on the [SandboxServers branch](https://github.com/SandboxServers/agentcraft/tree/mp/integration/docs/multiplayer/worknotes).
+
 | Packet | Status | Wave | PR | Worknote |
 |---|---|---|---|---|
-| MP-00 Spike and plan | **Done** | — | (this commit) | [MP-00](worknotes/MP-00.md) |
-| MP-F Foundation | Review | 0 | #5 | [MP-F](worknotes/MP-F.md) |
-| MP-T Game tests | Review | 0 | #1 | [MP-T](worknotes/MP-T.md) |
-| MP-B Baseline (Node ≥ 22.18) | Review | 0 | #2 | [MP-B](worknotes/MP-B.md) |
-| MP-H Two-client harness | Review | 0 | #4 | [MP-H](worknotes/MP-H.md) |
+| MP-00 Spike and plan | **Done** | — | (this commit) | [MP-00](https://github.com/SandboxServers/agentcraft/blob/mp/integration/docs/multiplayer/worknotes/MP-00.md) |
+| MP-F Foundation | Review | 0 | #5 | [MP-F](https://github.com/SandboxServers/agentcraft/blob/mp/integration/docs/multiplayer/worknotes/MP-F.md) |
+| MP-T Game tests | Review | 0 | #1 | [MP-T](https://github.com/SandboxServers/agentcraft/blob/mp/integration/docs/multiplayer/worknotes/MP-T.md) |
+| MP-B Baseline (Node ≥ 22.18) | Review | 0 | #2 | [MP-B](https://github.com/SandboxServers/agentcraft/blob/mp/integration/docs/multiplayer/worknotes/MP-B.md) |
+| MP-H Two-client harness | Review | 0 | #4 | [MP-H](https://github.com/SandboxServers/agentcraft/blob/mp/integration/docs/multiplayer/worknotes/MP-H.md) |
 | MP-01 Server mode and world rules | Review (reviewed and verified, in `mp/integration`) | 1 | #6 | on the branch `mp/MP-01-server-mode` |
 | MP-02 Build at an offset | Review (reviewed and verified, in `mp/integration`) | 1 | #7 | on the branch `mp/MP-02-offset-build` |
 | MP-03 Plots: registry, lifecycle, commands | Review (reviewed and verified, in `mp/integration`) | 1 | #8 | on the branch `mp/MP-03-plots` |

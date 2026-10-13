@@ -337,7 +337,8 @@ no hub, so the console's `/foreman` and the HUD pill replace its Status tab.
    `root` (the checkout) and `commit` (`git rev-parse HEAD` at start; foreman/src/main.ts). Who started
    it: the mod's record `<home>/<profile>/launcher.json` (pid and process start time), else
    tools/launch.ps1's `artifacts/run/foreman-<profile>-*.json` or tools/launch-unix.mjs's
-   `unix-foreman-<profile>.json` in the checkout.
+   `unix-foreman-<profile>.json` in the checkout (a name from before that script was renamed, kept so
+   a Foreman an older launcher started is still recognised).
 4. **Decision** (`LauncherPlan.decide`). "Ours" is only the very process `launcher.json` names (same pid
    and start time); "current" means same checkout (real paths) and same commit as the checkout now.
 

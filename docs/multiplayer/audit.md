@@ -1,7 +1,7 @@
 # Multiplayer: Audit Against `main`
 
 > Type: reference. Audience: the coordinator and packet workers.
-> Updated: 2026-10-03 (MP-00 spike, `main` @ `0be815d`). Companions: [campaign README](README.md), [work packets](work-packets.md), [MP-00 worknote](worknotes/MP-00.md).
+> Updated: 2026-10-03 (MP-00 spike, `main` @ `0be815d`). Companions: [campaign README](README.md), [work packets](work-packets.md), [MP-00 worknote](https://github.com/SandboxServers/agentcraft/blob/mp/integration/docs/multiplayer/worknotes/MP-00.md).
 
 Paths are relative to the repo root; `mod/src/main/java/dev/agentcraft/` is shortened to `main/…` and `mod/src/client/java/dev/agentcraft/client/` to `client/…`. IDs (`A-nn`) are cited by the work packets. "Verified" means the spike ran it on this machine; everything else is read from the code, and inferences are marked.
 

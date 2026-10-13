@@ -1,7 +1,7 @@
 # Player install and join
 
 > Type: how-to. Audience: someone joining the hosted AgentCraft server.
-> Updated: 2026-10-04 (MP-14). Companions: [deploy runbook](deploy.md), [campaign README](README.md).
+> Updated: 2026-10-04 (MP-14). Companions: [deploy runbook](https://github.com/SandboxServers/agentcraft/blob/mp/integration/docs/multiplayer/deploy.md), [campaign README](README.md).
 
 One shared Minecraft world, one studio plot per player. You bring your own Foreman: it runs on
 **your** machine and owns your agents, code and credentials. The server only relays a redacted
@@ -110,4 +110,4 @@ studio dims to "Foreman offline".
 | "You are not whitelisted on this server" | Ask the operator to `whitelist add <your Minecraft name>`. |
 | "Connection refused" / cannot reach the server | Wrong `<server address>` or `<port>`, or the operator has not forwarded it. |
 | You joined but your studio has no agents | Your Foreman is not running, or the game and the Foreman disagree on the port. Start the Foreman first and check `127.0.0.1:7878`. |
-| Other players' studios do not appear | You are out of relay range, or the server still has multiplayer off (`"enabled": false`; see the [deploy runbook](deploy.md#multiplayer-config)). |
+| Other players' studios do not appear | You are out of relay range, or the server still has multiplayer off (`"enabled": false`; see the [deploy runbook](https://github.com/SandboxServers/agentcraft/blob/mp/integration/docs/multiplayer/deploy.md#multiplayer-config)). |
