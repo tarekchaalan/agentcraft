@@ -75,6 +75,7 @@ describe('a cloud provider switch in the shell', () => {
       agentId: 'kit',
       role: 'worker',
       cwd,
+      repoPath: cwd,
       prompt: 'Your task: t1',
       instructions: '',
       env,

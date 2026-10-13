@@ -1,6 +1,7 @@
 // The Claude engine: one Claude Agent SDK `query()` per turn. We spawn the CLI ourselves (same as
 // the SDK's local spawn) so its pid is known and a stopped turn's whole process tree can be ended.
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { query, type AgentDefinition, type CanUseTool, type Options, type Query } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeConfig } from '../../config.js';
@@ -10,7 +11,7 @@ import { userName } from '../../user.js';
 import { truncate } from '../../util/text.js';
 import type { AuthCheck, Engine, Role, TurnSpec, TurnStats } from '../engine.js';
 import { detectApiAuth, NO_API_AUTH_MESSAGE, withAuthMode } from './auth.js';
-import { buildSkillsPlugin, instructionsBlock } from './context.js';
+import { buildSkillsPlugin, expandHome, instructionsBlock, mcpServersFor } from './context.js';
 import { guardrailHook } from './permissions.js';
 import { StreamMapper } from './stream.js';
 import { loadSubagents } from './subagents.js';
@@ -31,6 +32,8 @@ export class ClaudeEngine implements Engine {
   private subagentDefs: Record<string, AgentDefinition> = {};
   /** the Foreman's skills plugin (built from claude.context.skills when the engine is created) */
   private skillsPlugin: { path: string; ids: string[] } | undefined;
+  /** context warnings already logged (each once per run, not once per turn) */
+  private warned = new Set<string>();
 
   constructor(
     private fm: Foreman,
@@ -111,14 +114,25 @@ export class ClaudeEngine implements Engine {
       this.fm.log.error(`claude.context: could not build the skills plugin: ${(e as Error).message}`);
       this.skillsPlugin = undefined;
     }
+    // a listed file that is missing is skipped at every turn: say so once, here
+    for (const f of c.files) {
+      const file = path.resolve(expandHome(f));
+      if (!fs.existsSync(file)) this.fm.log.warn(`claude.context: instruction file ${file} not found; agents start without it`);
+    }
     const what = [
-      c.repoInstructions ? 'repo CLAUDE.md/AGENTS.md' : '',
+      c.repoInstructions ? 'repo CLAUDE.md/AGENTS.md/.claude/rules (base checkout)' : '',
       c.userInstructions ? '~/.claude/CLAUDE.md' : '',
       c.files.length ? `${c.files.length} instruction file(s)` : '',
       this.skillsPlugin ? `skills ${this.skillsPlugin.ids.map((i) => i.split(':')[1]).join(', ')}` : '',
       Object.keys(c.mcpServers).length ? `MCP ${Object.keys(c.mcpServers).join(', ')}` : '',
     ].filter(Boolean);
     this.fm.log.info(`agent context: ${what.join('; ') || 'none'}`);
+  }
+
+  private warnOnce(message: string): void {
+    if (this.warned.has(message)) return;
+    this.warned.add(message);
+    this.fm.log.warn(`claude.context: ${message}`);
   }
 
   /** The enabled skills (and their copied files, readable) and the MCP tools allowed in config. */
@@ -149,7 +163,7 @@ export class ClaudeEngine implements Engine {
     const api = detectApiAuth(process.env);
     const mode = this.authMode();
     if (!this.cfg.useClaudeLogin && !api.ok) return { ok: false, message: NO_API_AUTH_MESSAGE, mode };
-    const q = this.queryFn({ prompt: never(), options: { settingSources: [], persistSession: false, permissionMode: 'default', env: withAuthMode({ ...process.env }, this.cfg.useClaudeLogin) } });
+    const q = this.queryFn({ prompt: never(), options: { settingSources: [], strictMcpConfig: true, persistSession: false, permissionMode: 'default', env: withAuthMode({ ...process.env }, this.cfg.useClaudeLogin) } });
     try {
       const info = await Promise.race([q.accountInfo(), new Promise<never>((_, r) => setTimeout(() => r(new Error('timed out after 45s')), 45_000))]);
       const ok = !!(info.email || info.organization || (info.apiKeySource && info.apiKeySource !== 'none') || (info.tokenSource && info.tokenSource !== 'none') || (info.apiProvider && info.apiProvider !== 'firstParty'));
@@ -191,7 +205,7 @@ export class ClaudeEngine implements Engine {
     let timer: NodeJS.Timeout | undefined;
     let usage: Usage;
     try {
-      q = this.queryFn({ prompt: never(), options: { settingSources: [], persistSession: false, permissionMode: 'default', env: withAuthMode({ ...process.env }, this.cfg.useClaudeLogin) } });
+      q = this.queryFn({ prompt: never(), options: { settingSources: [], strictMcpConfig: true, persistSession: false, permissionMode: 'default', env: withAuthMode({ ...process.env }, this.cfg.useClaudeLogin) } });
       const target = q as unknown as Record<string, unknown>;
       const method = USAGE_METHODS.find((m) => typeof target[m] === 'function');
       if (!method) {
@@ -228,18 +242,21 @@ export class ClaudeEngine implements Engine {
       return r.allow ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: r.message, ...(r.interrupt ? { interrupt: true } : {}) };
     };
     // claude.context: the instruction files the user chose, read by the Foreman (never through
-    // settingSources), after the role prompt, which takes precedence
-    const extra = instructionsBlock(this.cfg.context, cwd, userName());
+    // settingSources) from the repository's base checkout, never the agent's (writable) worktree;
+    // one block after the role prompt, which takes precedence
+    const extra = instructionsBlock(this.cfg.context, spec.repoPath, userName(), undefined, (m) => this.warnOnce(m));
     const options: Options = {
       cwd,
       model: this.model(role),
       effort: role === 'lead' ? this.cfg.leadEffort : this.cfg.effort,
       maxTurns: role === 'lead' ? this.cfg.maxTurnsLead : this.cfg.maxTurnsWorker,
       settingSources: [],
+      // only the servers passed here: no .mcp.json, no plugin servers, no claude.ai connectors
+      strictMcpConfig: true,
       // permission mode, tools (incl. Skill), rules, subagents, skills plugin, guardrail hook
       ...this.permissionOptions(spec, canUseTool),
       // the user's extra servers first, so the team tools server can never be replaced
-      mcpServers: { ...this.cfg.context.mcpServers, [MCP_SERVER]: mcpServer(spec.tools) },
+      mcpServers: { ...mcpServersFor(this.cfg.context, spec.repoPath), [MCP_SERVER]: mcpServer(spec.tools) },
       systemPrompt: { type: 'preset', preset: 'claude_code', append: extra ? `${spec.instructions}\n\n${extra}` : spec.instructions },
       abortController: abort,
       env: withAuthMode(spec.env, this.cfg.useClaudeLogin),

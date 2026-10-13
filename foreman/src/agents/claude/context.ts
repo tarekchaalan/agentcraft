@@ -1,36 +1,47 @@
 // Claude Code context for agents: instruction files, skills and extra MCP servers, chosen in
-// config.json `claude.context`.
+// config.json `claude.context` (the only place they are configured).
 //
-// Agents run with `settingSources: []`, so the CLI loads no CLAUDE.md, settings, hooks, skills or
-// MCP config of its own. Turning those sources on would also load settings-file `permissions.allow`
-// rules and repo hooks, which run before (or outside) the permission policy in canUseTool. Instead
-// the Foreman reads exactly what the user configured:
+// Agents run with `settingSources: []` and `strictMcpConfig: true`, so the CLI loads no CLAUDE.md,
+// settings, hooks, skills or MCP config of its own. Turning those sources on would also load
+// settings-file `permissions.allow` rules, repo hooks and a repo's `.mcp.json`, which run before (or
+// outside) the permission policy in canUseTool. Instead the Foreman reads exactly what the user
+// configured:
 //
-//   instructions  repo CLAUDE.md / AGENTS.md (default on), the user's ~/.claude/CLAUDE.md (opt in),
-//                 extra files by path; `@path` imports expanded like Claude Code does; appended to
-//                 the role prompt, which stays in charge
+//   instructions  the repository's CLAUDE.md / .claude/CLAUDE.md / AGENTS.md / .claude/rules/*.md
+//                 (default on), read from the BASE checkout (never a worker's worktree, which an
+//                 agent can write to); the user's ~/.claude/CLAUDE.md (opt in); extra files by path.
+//                 `@path` imports expanded like Claude Code does, each file once; one block appended
+//                 to the role prompt, which stays in charge
 //   skills        copied into a Foreman-owned plugin with `allowed-tools` stripped (that
 //                 frontmatter pre-approves tools ahead of canUseTool), enabled one by one
-//   mcpServers    passed to the SDK as given; their tools still ask unless they match `mcpAllow`
+//   mcpServers    stdio servers, validated when the config loads; their tools still ask unless
+//                 `mcpAllow` names them (exactly, or `mcp__<server>__*`)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk';
+import type { McpStdioServerConfig } from '@anthropic-ai/claude-agent-sdk';
+
+/** A stdio MCP server the agents may use (the SDK's McpStdioServerConfig subset). */
+export interface McpStdioConfig {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
 
 export interface AgentContextConfig {
-  /** the repository's CLAUDE.md, .claude/CLAUDE.md and AGENTS.md (default true) */
+  /** the repository's CLAUDE.md, .claude/CLAUDE.md, AGENTS.md and .claude/rules/*.md (default true) */
   repoInstructions: boolean;
   /** the user's ~/.claude/CLAUDE.md (default false: it is written for interactive sessions) */
   userInstructions: boolean;
-  /** more instruction files (absolute or ~ paths) */
+  /** more instruction files (absolute, `~/...`, or relative to the AgentCraft home, resolved at load) */
   files: string[];
   /** cap on the appended instructions (characters) */
   maxChars: number;
   /** skill directories or names under ~/.claude/skills */
   skills: string[];
-  /** extra MCP servers for every agent */
-  mcpServers: Record<string, McpServerConfig>;
-  /** MCP tool names (or `prefix*`) that run without asking, e.g. "mcp__xcode__*" */
+  /** extra stdio MCP servers for every agent (never read from a repo's .mcp.json) */
+  mcpServers: Record<string, McpStdioConfig>;
+  /** MCP tools that run without asking: full names `mcp__<server>__<tool>`, or `mcp__<server>__*` */
   mcpAllow: string[];
 }
 
@@ -49,6 +60,96 @@ const MAX_IMPORT_DEPTH = 5;
 
 export function expandHome(p: string, home = os.homedir()): string {
   return p.replace(/^~(?=$|[\\/])/, home);
+}
+
+// ---- config.json claude.context -----------------------------------------------------------------
+
+/** Lowercase letters, digits and "-": no "_", so `mcp__<server>__<tool>` always splits the same way. */
+const MCP_NAME = /^[a-z0-9-]+$/;
+/** an mcpAllow entry: `mcp__<server>__<tool>`, or `mcp__<server>__*` for all of a server's tools */
+const MCP_ALLOW = /^mcp__([a-z0-9-]+)__(\S+)$/;
+
+function stringList(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0) : [];
+}
+
+/**
+ * claude.context.mcpServers: stdio servers only. A bad entry fails the config load rather than
+ * silently giving the agents fewer (or other) tools than configured. `agentcraft*` is refused: the
+ * policy approves every `mcp__agentcraft__*` tool by prefix.
+ */
+export function parseMcpServers(v: unknown): Record<string, McpStdioConfig> {
+  if (v === undefined) return {};
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) throw new Error('claude.context.mcpServers must be an object of name -> {command, args?, env?}');
+  const out: Record<string, McpStdioConfig> = {};
+  for (const [name, raw] of Object.entries(v as Record<string, unknown>)) {
+    if (!MCP_NAME.test(name) || name.startsWith('agentcraft')) throw new Error(`bad MCP server name "${name}" in claude.context.mcpServers (lowercase letters, digits and "-"; not "agentcraft*")`);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`MCP server "${name}" must be an object {command, args?, env?}`);
+    const o = raw as Record<string, unknown>;
+    if (o.type !== undefined && o.type !== 'stdio') throw new Error(`MCP server "${name}": only stdio servers ({command, args?, env?}) are supported, not "${String(o.type)}"`);
+    if (typeof o.command !== 'string' || !o.command.trim()) throw new Error(`MCP server "${name}" needs a "command"`);
+    if (o.args !== undefined && !(Array.isArray(o.args) && o.args.every((a) => typeof a === 'string'))) throw new Error(`MCP server "${name}": args must be a list of strings`);
+    if (o.env !== undefined && !(o.env && typeof o.env === 'object' && !Array.isArray(o.env) && Object.values(o.env).every((x) => typeof x === 'string'))) {
+      throw new Error(`MCP server "${name}": env must be an object of strings`);
+    }
+    out[name] = { command: o.command, ...(o.args ? { args: o.args as string[] } : {}), ...(o.env ? { env: o.env as Record<string, string> } : {}) };
+  }
+  return out;
+}
+
+/** claude.context.mcpAllow: full tool names or `mcp__<server>__*`, of a server in mcpServers. */
+export function parseMcpAllow(v: unknown, servers: Record<string, McpStdioConfig>): string[] {
+  if (v === undefined) return [];
+  if (!Array.isArray(v) || !v.every((t) => typeof t === 'string')) throw new Error('claude.context.mcpAllow must be a list of tool names');
+  for (const t of v as string[]) {
+    const m = MCP_ALLOW.exec(t);
+    if (!m || !(m[1]! in servers) || (m[2]!.includes('*') && m[2] !== '*')) {
+      throw new Error(`bad mcpAllow entry "${t}" (use mcp__<server>__<tool>, or mcp__<server>__* for all its tools, of a server in claude.context.mcpServers)`);
+    }
+  }
+  return v as string[];
+}
+
+/** True when `pattern` (an mcpAllow entry) allows `toolName`: the exact name, or `mcp__<server>__*`. */
+export function mcpAllowMatches(pattern: string, toolName: string): boolean {
+  if (pattern === toolName) return true;
+  const m = MCP_ALLOW.exec(pattern);
+  return !!m && m[2] === '*' && toolName.startsWith(pattern.slice(0, -1));
+}
+
+/**
+ * config.json claude.context. `home` is the AgentCraft home: relative `files` resolve against it
+ * (where config.json lives); `~/...` stays and is expanded when read. Unknown keys are ignored and
+ * wrong types of the plain settings fall back to the defaults; MCP entries are validated.
+ */
+export function parseContextConfig(v: unknown, home: string): AgentContextConfig {
+  if (v !== undefined && (v === null || typeof v !== 'object' || Array.isArray(v))) throw new Error('claude.context must be an object');
+  const o = (v ?? {}) as Record<string, unknown>;
+  const servers = parseMcpServers(o.mcpServers);
+  return {
+    repoInstructions: typeof o.repoInstructions === 'boolean' ? o.repoInstructions : DEFAULT_CONTEXT.repoInstructions,
+    userInstructions: typeof o.userInstructions === 'boolean' ? o.userInstructions : DEFAULT_CONTEXT.userInstructions,
+    files: stringList(o.files).map((f) => (/^~(?=$|[\\/])/.test(f) || path.isAbsolute(f) ? f : path.resolve(home, f))),
+    maxChars: typeof o.maxChars === 'number' && o.maxChars > 0 ? o.maxChars : DEFAULT_CONTEXT.maxChars,
+    skills: stringList(o.skills),
+    mcpServers: servers,
+    mcpAllow: parseMcpAllow(o.mcpAllow, servers),
+  };
+}
+
+/**
+ * The configured stdio servers for an agent working on the repository at `repoPath` (its base
+ * checkout). engram resolves its project from the cwd, and a worktree without a remote would
+ * resolve to its own directory name: pin it to the base repo's name so memories land in one project.
+ */
+export function mcpServersFor(cfg: AgentContextConfig, repoPath: string): Record<string, McpStdioServerConfig> {
+  const out: Record<string, McpStdioServerConfig> = {};
+  for (const [name, s] of Object.entries(cfg.mcpServers)) {
+    const args = [...(s.args ?? [])];
+    if (name === 'engram' && !args.includes('--project')) args.push('--project', path.basename(repoPath));
+    out[name] = { type: 'stdio', command: s.command, args, ...(s.env ? { env: s.env } : {}) };
+  }
+  return out;
 }
 
 function realOrSelf(p: string): string {
@@ -107,28 +208,55 @@ export function readInstructions(file: string, opts: { home?: string; seen?: Set
     .join('\n');
 }
 
-/** The instruction files for an agent working in `cwd`, as labelled sections. */
-export function instructionSources(cfg: AgentContextConfig, cwd: string, home = os.homedir()): Array<{ label: string; file: string }> {
+/** The repository's instruction files: CLAUDE.md, .claude/CLAUDE.md, AGENTS.md, then .claude/rules/*.md by name. */
+export function repoInstructionFiles(repoPath: string): string[] {
+  const files = ['CLAUDE.md', path.join('.claude', 'CLAUDE.md'), 'AGENTS.md'].map((f) => path.join(repoPath, f));
+  try {
+    const rules = path.join(repoPath, '.claude', 'rules');
+    for (const f of fs.readdirSync(rules).sort()) if (f.endsWith('.md')) files.push(path.join(rules, f));
+  } catch {
+    /* no rules directory */
+  }
+  return files;
+}
+
+/**
+ * The instruction files for an agent on the repository whose base checkout is `repoPath` (the lead's
+ * cwd; a worker's worktree is made from it), as labelled sections.
+ */
+export function instructionSources(cfg: AgentContextConfig, repoPath: string, home = os.homedir()): Array<{ label: string; file: string }> {
   const out: Array<{ label: string; file: string }> = [];
   if (cfg.userInstructions) out.push({ label: 'Your user instructions', file: path.join(home, '.claude', 'CLAUDE.md') });
   for (const f of cfg.files) out.push({ label: 'Instructions', file: path.resolve(expandHome(f, home)) });
-  if (cfg.repoInstructions) {
-    for (const f of ['CLAUDE.md', path.join('.claude', 'CLAUDE.md'), 'AGENTS.md']) out.push({ label: 'Repository instructions', file: path.join(cwd, f) });
-  }
+  if (cfg.repoInstructions) for (const file of repoInstructionFiles(repoPath)) out.push({ label: 'Repository instructions', file });
   return out;
 }
 
-/** The block appended to an agent's system prompt ('' when there is nothing to add). */
-export function instructionsBlock(cfg: AgentContextConfig, cwd: string, userName: string, home = os.homedir()): string {
+/** A file's name in its heading: repo-relative when inside the repo, with "/" on every platform. */
+function shownPath(file: string, repoPath: string): string {
+  const rel = path.relative(repoPath, file);
+  const inside = rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+  return (inside ? rel : file).split(path.sep).join('/');
+}
+
+/**
+ * The one block appended to an agent's system prompt ('' when there is nothing to add): one header,
+ * then each file once (a file another one imports, or listed twice, is not repeated). `warn` hears
+ * about truncation.
+ */
+export function instructionsBlock(cfg: AgentContextConfig, repoPath: string, userName: string, home = os.homedir(), warn?: (msg: string) => void): string {
   const seen = new Set<string>();
   const parts: string[] = [];
-  for (const s of instructionSources(cfg, cwd, home)) {
+  for (const s of instructionSources(cfg, repoPath, home)) {
     const body = readInstructions(s.file, { home, seen }).trim();
-    if (body) parts.push(`## ${s.label} (${s.file.startsWith(cwd) ? path.relative(cwd, s.file) : s.file})\n\n${body}`);
+    if (body) parts.push(`## ${s.label} (${shownPath(s.file, repoPath)})\n\n${body}`);
   }
   if (!parts.length) return '';
   let text = parts.join('\n\n');
-  if (text.length > cfg.maxChars) text = `${text.slice(0, cfg.maxChars)}\n\n(instructions truncated at ${cfg.maxChars} characters)`;
+  if (text.length > cfg.maxChars) {
+    warn?.(`instructions for ${repoPath} are ${text.length} characters, over claude.context.maxChars ${cfg.maxChars}: truncated`);
+    text = `${text.slice(0, cfg.maxChars)}\n\n(instructions truncated at ${cfg.maxChars} characters)`;
+  }
   return `# Instructions from ${userName}'s files
 Follow these where they apply to your task. Your AgentCraft role and its rules above take precedence where they conflict (your worktree, no push, how you hand work back, asking ${userName} through ask_user).
 

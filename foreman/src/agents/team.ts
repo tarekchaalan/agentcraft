@@ -691,12 +691,13 @@ export class TeamBackend implements Backend {
     }
   }
 
-  private cwdFor(job: Job): { cwd: string; role: 'lead' | 'worker' } {
+  /** Where a job runs, and the base checkout of its repository (context is read from there, never a worktree). */
+  private cwdFor(job: Job): { cwd: string; role: 'lead' | 'worker'; repoPath: string } {
     if (job.agentId === LEAD) {
       const goal = job.goalId ? this.fm.goal(job.goalId) : this.fm.currentGoal();
       const repo = goal?.repoId ? this.fm.repos.get(goal.repoId) : this.fm.repos.defaultRepo();
       if (!repo) throw new Error('no repo for the lead');
-      return { cwd: repo.path, role: 'lead' };
+      return { cwd: repo.path, role: 'lead', repoPath: repo.path };
     }
     const t = job.taskId ? this.fm.tasks.get(job.taskId) : undefined;
     if (!t?.worktree || !t.repoId) throw new Error(`job for ${job.agentId} has no worktree`);
@@ -704,7 +705,7 @@ export class TeamBackend implements Backend {
     // its directory is gone: the CLI would fail to start in it (the SDK reports that as a
     // "native binary failed to launch" error)
     if (wt.status !== 'active') throw new Error(`worktree ${wt.id} is ${wt.status}; ${t.id} has no worktree to work in`);
-    return { cwd: wt.path, role: 'worker' };
+    return { cwd: wt.path, role: 'worker', repoPath: this.fm.repos.require(t.repoId).path };
   }
 
   /** What the AgentCraft policy needs to judge this agent's tool calls. */
@@ -853,6 +854,7 @@ export class TeamBackend implements Backend {
           agentId,
           role,
           cwd,
+          repoPath: where.repoPath,
           prompt,
           instructions: systemAppend,
           ...(resume ? { resume } : {}),

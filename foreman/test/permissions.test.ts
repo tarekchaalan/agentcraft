@@ -208,4 +208,33 @@ describe('session options', () => {
       rmrf(agentsHome);
     }
   });
+
+  it("auto mode: the guardrail hook judges with claude.context's skills and mcpAllow, like the policy gate", async () => {
+    const skillHome = tempDir();
+    write(path.join(skillHome, 'ship', 'SKILL.md'), '---\nname: ship\ndescription: s\n---\nShip it');
+    const { options, cleanup } = await session({
+      claude: {
+        permissions: { mode: 'auto' },
+        context: { skills: [path.join(skillHome, 'ship')], mcpServers: { docs: { command: 'docs-mcp' } }, mcpAllow: ['mcp__docs__search'] },
+      },
+    });
+    try {
+      const w = options[1]!;
+      expect(w.tools).toContain('Skill');
+      const hook = w.hooks!.PreToolUse![0]!.hooks[0]!;
+      const run = (tool_name: string, tool_input: Record<string, unknown>) =>
+        hook({ hook_event_name: 'PreToolUse', tool_name, tool_input, tool_use_id: 'x', session_id: 's', transcript_path: '', cwd: w.cwd! } as HookInput, 'x', { signal: new AbortController().signal });
+      expect(await run('Skill', { skill: 'ship' })).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } });
+      expect(await run('Skill', { skill: 'other' })).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
+      expect(await run('mcp__docs__search', {})).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } });
+      // not in mcpAllow: the policy would ask, so auto mode's classifier decides
+      expect(await run('mcp__docs__write', {})).toEqual({});
+      // the skill's copied files are readable like the policy's other read dirs
+      const skillFile = path.join(path.dirname(w.plugins![0]!.path), 'agent-plugin', 'skills', 'ship', 'SKILL.md');
+      expect(await run('Read', { file_path: skillFile })).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } });
+    } finally {
+      await cleanup();
+      rmrf(skillHome);
+    }
+  });
 });

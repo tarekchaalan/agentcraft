@@ -127,3 +127,42 @@ describe('user name', () => {
     }
   });
 });
+
+describe('claude.context: instruction files, mcpServers, mcpAllow', () => {
+  function loadWith(claude: Record<string, unknown>, args: string[] = []) {
+    home = tempDir();
+    fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ claude }));
+    return loadConfig(['--home', home, ...args], {});
+  }
+  const engram = { engram: { command: 'engram', args: ['mcp', '--tools=agent'] } };
+
+  it('has repo instructions on and no files or MCP servers by default', () => {
+    expect(load([]).claude.context).toMatchObject({ repoInstructions: true, files: [], mcpServers: {}, mcpAllow: [] });
+  });
+
+  it('reads stdio servers and mcpAllow (exact names or mcp__<server>__*); relative files resolve against the home', () => {
+    const c = loadWith({ context: { files: ['mine.md', '~/x.md'], mcpServers: { ...engram, xcode: { type: 'stdio', command: 'xcodebuildmcp', env: { A: '1' } } }, mcpAllow: ['mcp__engram__mem_search', 'mcp__xcode__*'] } }).claude.context;
+    expect(c.mcpServers).toEqual({ ...engram, xcode: { command: 'xcodebuildmcp', env: { A: '1' } } });
+    expect(c.mcpAllow).toEqual(['mcp__engram__mem_search', 'mcp__xcode__*']);
+    expect(c.files).toEqual([path.join(home!, 'mine.md'), '~/x.md']);
+  });
+
+  it('refuses server names that could inherit the agentcraft approval, non-stdio servers, and bad mcpAllow entries', () => {
+    for (const name of ['agentcraft', 'agentcraft-x', 'agentcraft__x', 'a__b', 'Eng']) expect(() => loadWith({ context: { mcpServers: { [name]: { command: 'x' } } } })).toThrow(/bad MCP server name/);
+    expect(() => loadWith({ context: { mcpServers: { docs: { type: 'http', url: 'http://127.0.0.1:1/mcp' } } } })).toThrow(/only stdio servers/);
+    expect(() => loadWith({ context: { mcpServers: { docs: { args: ['x'] } } } })).toThrow(/needs a "command"/);
+    expect(() => loadWith({ context: { mcpServers: { docs: { command: 'x', args: 'y' } } } })).toThrow(/args must be a list/);
+    expect(() => loadWith({ context: { mcpServers: engram, mcpAllow: ['mem_search'] } })).toThrow(/bad mcpAllow/);
+    expect(() => loadWith({ context: { mcpServers: engram, mcpAllow: ['mcp__github__create_issue'] } })).toThrow(/bad mcpAllow/);
+    expect(() => loadWith({ context: { mcpServers: engram, mcpAllow: ['mcp__engram__mem_*'] } })).toThrow(/bad mcpAllow/);
+    expect(() => loadWith({ context: { mcpServers: engram, mcpAllow: ['mcp__*'] } })).toThrow(/bad mcpAllow/);
+    expect(() => loadWith({ context: { mcpServers: engram, mcpAllow: ['mcp__agentcraft__x'] } })).toThrow(/bad mcpAllow/);
+  });
+
+  it('refuses the old top-level keys and names their place under claude.context', () => {
+    expect(() => loadWith({ repoContext: true })).toThrow(/claude\.repoContext .*claude\.context\.repoInstructions/);
+    expect(() => loadWith({ instructionsFile: 'mine.md' })).toThrow(/claude\.context\.files/);
+    expect(() => loadWith({ mcpServers: engram })).toThrow(/claude\.context\.mcpServers/);
+    expect(() => loadWith({ mcpAllow: [] })).toThrow(/claude\.context\.mcpAllow/);
+  });
+});

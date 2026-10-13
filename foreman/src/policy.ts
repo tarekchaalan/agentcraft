@@ -68,7 +68,7 @@ export interface PolicyContext {
   subagents?: boolean;
   /** skills the user enabled for agents ("plugin:name"); without any, the Skill tool is refused */
   skills?: string[];
-  /** MCP tools (names or "prefix*") the user allowed without asking */
+  /** MCP tools the user allowed without asking (claude.context.mcpAllow): full names, or `mcp__<server>__*` */
   mcpAllow?: string[];
 }
 
@@ -2155,7 +2155,8 @@ export function classifyToolUse(toolName: string, input: Record<string, unknown>
   }
 
   if (toolName.startsWith('mcp__')) {
-    const allowed = ctx.mcpAllow?.some((p) => (p.endsWith('*') ? p.length > 6 && toolName.startsWith(p.slice(0, -1)) : toolName === p));
+    // exact names, or every tool of one server (`mcp__<server>__*`; no other wildcard)
+    const allowed = ctx.mcpAllow?.some((p) => p === toolName || (/^mcp__[a-z0-9-]+__\*$/.test(p) && toolName.startsWith(p.slice(0, -1))));
     if (allowed) return { action: 'allow', reason: `MCP tool allowed in config: ${toolName}` };
     return always(toolName) ?? askVerdict(`external MCP tool ${toolName}`, toolName);
   }

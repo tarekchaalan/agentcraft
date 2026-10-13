@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { readJson } from './util/fsx.js';
 import type { BackendName } from './protocol.js';
 import { defaultUserName } from './user.js';
-import type { EffortLevel, McpServerConfig } from '@anthropic-ai/claude-agent-sdk';
-import { DEFAULT_CONTEXT, type AgentContextConfig } from './agents/claude/context.js';
+import type { EffortLevel } from '@anthropic-ai/claude-agent-sdk';
+import { parseContextConfig, type AgentContextConfig } from './agents/claude/context.js';
 import { DEFAULT_PERMISSIONS, type PermissionsConfig } from './agents/claude/permissions.js';
 import { DEFAULT_SUBAGENTS, type SubagentsConfig } from './agents/claude/subagents.js';
 
@@ -228,25 +228,22 @@ function subagentsConfig(v: unknown): SubagentsConfig {
   return { enabled: typeof o.enabled === 'boolean' ? o.enabled : DEFAULT_SUBAGENTS.enabled, agents: stringList(o.agents) };
 }
 
-/** config.json claude.context; unknown keys are ignored, wrong types fall back to the defaults. */
-function contextConfig(v: unknown): AgentContextConfig {
-  const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
-  const servers: Record<string, McpServerConfig> = {};
-  if (o.mcpServers && typeof o.mcpServers === 'object') {
-    for (const [name, def] of Object.entries(o.mcpServers as Record<string, unknown>)) {
-      // "agentcraft" is the team tools server; nothing may replace it
-      if (name !== 'agentcraft' && /^[\w-]+$/.test(name) && def && typeof def === 'object') servers[name] = def as McpServerConfig;
-    }
+/**
+ * Agent context lives under claude.context only. These top-level keys (an earlier, separate config
+ * surface) are refused with their new place, rather than silently giving agents less than configured.
+ */
+const MOVED_CLAUDE_KEYS: Record<string, string> = {
+  repoContext: 'claude.context.repoInstructions (on by default)',
+  instructionsFile: 'claude.context.files',
+  mcpServers: 'claude.context.mcpServers',
+  mcpAllow: 'claude.context.mcpAllow',
+};
+
+function contextConfig(fileClaude: Record<string, unknown>, home: string): AgentContextConfig {
+  for (const [key, to] of Object.entries(MOVED_CLAUDE_KEYS)) {
+    if (key in fileClaude) throw new Error(`config.json claude.${key} is not a setting: use ${to}`);
   }
-  return {
-    repoInstructions: typeof o.repoInstructions === 'boolean' ? o.repoInstructions : DEFAULT_CONTEXT.repoInstructions,
-    userInstructions: typeof o.userInstructions === 'boolean' ? o.userInstructions : DEFAULT_CONTEXT.userInstructions,
-    files: stringList(o.files),
-    maxChars: typeof o.maxChars === 'number' && o.maxChars > 0 ? o.maxChars : DEFAULT_CONTEXT.maxChars,
-    skills: stringList(o.skills),
-    mcpServers: servers,
-    mcpAllow: stringList(o.mcpAllow).filter((p) => p.startsWith('mcp__') && !p.startsWith('mcp__agentcraft__')),
-  };
+  return parseContextConfig(fileClaude.context, home);
 }
 
 function mergeStyle(v: unknown): 'merge' | 'squash' {
@@ -377,7 +374,7 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
       usagePoll: bool(flags.usage ?? fileClaude.usagePoll, true),
       permissions: permissionsConfig(fileClaude.permissions),
       subagents: subagentsConfig(fileClaude.subagents),
-      context: contextConfig(fileClaude.context),
+      context: contextConfig(fileClaude, home),
     },
     codex: {
       path: str(flags['codex-path']) ?? str(env.AGENTCRAFT_CODEX_PATH) ?? str(fileCodex.path),

@@ -134,30 +134,41 @@ most ~100 ms of state, and interrupted agent turns resume on the next start.
 
 ### Agent context (`claude.context`)
 
-Claude agents run with Claude Code's own settings off (`settingSources: []`): settings-file allow
-rules and repo hooks would run ahead of, or outside, the permission policy. What they do get is set
-here (the Claude engine adds it; Codex agents in a mixed team are not affected):
+Claude agents run with Claude Code's own settings off (`settingSources: []`, `strictMcpConfig: true`):
+settings-file allow rules, repo hooks and a repo's `.mcp.json` would run ahead of, or outside, the
+permission policy. What they do get is set here, and only here (the Claude engine adds it; Codex
+agents in a mixed team are not affected):
 
 ```json
 { "claude": { "context": {
     "repoInstructions": true,
     "userInstructions": false,
-    "files": ["~/.codex/AGENTS.md"],
+    "files": ["~/.codex/AGENTS.md", "my-rules.md"],
     "maxChars": 24000,
     "skills": ["roadmap-keeper", "~/somewhere/my-skill"],
-    "mcpServers": { "xcode": { "command": "xcodebuildmcp", "args": ["mcp"] } },
-    "mcpAllow": ["mcp__xcode__list_sims"] } } }
+    "mcpServers": {
+      "xcode": { "command": "xcodebuildmcp", "args": ["mcp"] },
+      "engram": { "command": "engram", "args": ["mcp", "--tools=agent"] } },
+    "mcpAllow": ["mcp__xcode__list_sims", "mcp__engram__*"] } } }
 ```
 
-- **Instructions:** the repository's `CLAUDE.md`, `.claude/CLAUDE.md` and `AGENTS.md` (on by default;
-  workers read them from their worktree, so committed versions), your `~/.claude/CLAUDE.md` (off by
-  default), and any `files`. `@path` imports are expanded. They are appended after the role prompt,
-  which wins where they conflict.
-- **Skills:** names under `~/.claude/skills` or paths. They are copied into `<profile>/agent-plugin`
-  with `allowed-tools` removed from `SKILL.md` (it would pre-approve tools), and only these can be
-  loaded with the Skill tool. Everything a skill then does goes through the normal permission checks.
-- **MCP servers:** given to every agent. Their tools ask for permission unless listed in `mcpAllow`
-  (exact names or `mcp__server__*`). The `agentcraft` server name is reserved.
+| key | default | |
+| --- | --- | --- |
+| `repoInstructions` | `true` | the repository's `CLAUDE.md`, `.claude/CLAUDE.md`, `AGENTS.md` and `.claude/rules/*.md` (by name), read from **your checkout** (the base of every worktree), never a worker's worktree: an agent cannot change what the next agent is told. In folder mode, your folder |
+| `userInstructions` | `false` | your `~/.claude/CLAUDE.md` (written for interactive sessions, so opt-in) |
+| `files` | `[]` | more instruction files: absolute, `~/...`, or relative to the AgentCraft home (where `config.json` is). A missing file is reported once at start |
+| `maxChars` | `24000` | cap on the instructions block; past it the block is cut and the Foreman log says so |
+| `skills` | `[]` | names under `~/.claude/skills` or paths. Copied into `<profile>/agent-plugin` with `allowed-tools` removed from `SKILL.md` (it would pre-approve tools); only these can be loaded with the Skill tool, and everything a skill then does goes through the normal permission checks |
+| `mcpServers` | `{}` | stdio servers `{command, args?, env?}` for every agent. Names: lowercase letters, digits and `-`, not `agentcraft*` (the team tools server). A bad entry, or any other server type, stops the Foreman at start with the reason. A server named `engram` gets `--project <repo folder name>` unless its args set one, so a worktree's memories land in the repository's project |
+| `mcpAllow` | `[]` | MCP tools that run without asking: full names `mcp__<server>__<tool>`, or `mcp__<server>__*` for all of a server's tools, of a server in `mcpServers`. Every other MCP tool asks |
+
+Instructions are one block appended after the role prompt, which wins where they conflict. Each file
+appears once: `@path` imports are expanded in place (as Claude Code does), and a file already
+included, by an import or twice in the list, is not repeated. Headings name repository files by their
+repo-relative path with `/` on every platform (`## Repository instructions (.claude/rules/style.md)`).
+The skills and `mcpAllow` reach the permission policy and, in auto mode, the guardrail hook alike.
+`claude.repoContext`, `claude.instructionsFile`, `claude.mcpServers` and `claude.mcpAllow` at the top
+level are refused with a pointer to their place here.
 
 While running, `<home>/<profile>/foreman.json` records `{pid, port, host, backend, profile, version, startedAt}`
 so launch scripts can find it; `<home>/foreman.json` holds the same for the first live Foreman (when

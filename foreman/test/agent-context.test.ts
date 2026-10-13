@@ -134,27 +134,26 @@ describe('policy with context', () => {
 describe('config', () => {
   it('reads claude.context and refuses to replace the agentcraft server', () => {
     const home = tempDir();
+    const ctxFile = (context: Record<string, unknown>) => write(path.join(home, 'config.json'), JSON.stringify({ claude: { context } }));
     try {
-      write(
-        path.join(home, 'config.json'),
-        JSON.stringify({
-          claude: {
-            context: {
-              userInstructions: true,
-              files: ['~/.codex/AGENTS.md', 3],
-              skills: ['roadmap-keeper'],
-              mcpServers: { xcode: { command: 'xcodebuildmcp' }, agentcraft: { command: 'evil' } },
-              mcpAllow: ['mcp__xcode__*', 'Bash', 'mcp__agentcraft__x'],
-            },
-          },
-        }),
-      );
+      ctxFile({
+        userInstructions: true,
+        files: ['~/.codex/AGENTS.md', 3],
+        skills: ['roadmap-keeper'],
+        mcpServers: { xcode: { command: 'xcodebuildmcp' } },
+        mcpAllow: ['mcp__xcode__*'],
+      });
       const c = loadConfig(['--home', home], {}).claude.context;
       expect(c.userInstructions).toBe(true);
       expect(c.repoInstructions).toBe(true);
       expect(c.files).toEqual(['~/.codex/AGENTS.md']);
       expect(Object.keys(c.mcpServers)).toEqual(['xcode']);
       expect(c.mcpAllow).toEqual(['mcp__xcode__*']);
+      // a bad entry fails the load instead of being dropped
+      ctxFile({ mcpServers: { xcode: { command: 'xcodebuildmcp' }, agentcraft: { command: 'evil' } } });
+      expect(() => loadConfig(['--home', home], {})).toThrow(/bad MCP server name "agentcraft"/);
+      ctxFile({ mcpServers: { xcode: { command: 'xcodebuildmcp' } }, mcpAllow: ['mcp__xcode__*', 'Bash'] });
+      expect(() => loadConfig(['--home', home], {})).toThrow(/bad mcpAllow entry "Bash"/);
       expect(loadConfig(['--home', tempDir()], {}).claude.context).toEqual(DEFAULT_CONTEXT);
     } finally {
       rmrf(home);
@@ -186,7 +185,7 @@ describe('claude backend sessions', () => {
     write(path.join(skillHome, 'ship', 'SKILL.md'), '---\nname: ship\ndescription: s\nallowed-tools: Bash(*)\n---\nShip it');
     write(
       path.join(home, 'config.json'),
-      JSON.stringify({ claude: { context: { skills: [path.join(skillHome, 'ship')], mcpServers: { docs: { type: 'http', url: 'http://127.0.0.1:1/mcp' } }, mcpAllow: ['mcp__docs__*'] } } }),
+      JSON.stringify({ claude: { context: { skills: [path.join(skillHome, 'ship')], mcpServers: { docs: { command: 'docs-mcp', args: ['serve'] } }, mcpAllow: ['mcp__docs__*'] } } }),
     );
     h = makeForeman(home, ['--backend', 'claude', '--workers', 'kit', '--repo', repoPath, '--no-lead-review']);
     const queryFn = ({ prompt, options }: { prompt: string; options?: Options }) => {
@@ -222,6 +221,7 @@ describe('claude backend sessions', () => {
     for (const s of seen) {
       const o = s.options;
       expect(o.settingSources).toEqual([]);
+      expect(o.strictMcpConfig).toBe(true);
       expect((o.systemPrompt as { append: string }).append).toContain('REPO RULE: use the demo style');
       expect(o.tools).toContain('Skill');
       expect(o.skills).toEqual(['agentcraft-skills:ship']);
