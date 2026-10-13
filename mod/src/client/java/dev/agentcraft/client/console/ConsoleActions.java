@@ -6,6 +6,7 @@ import dev.agentcraft.client.console.ConsoleCommands.Clear;
 import dev.agentcraft.client.console.ConsoleCommands.Command;
 import dev.agentcraft.client.console.ConsoleCommands.Decide;
 import dev.agentcraft.client.console.ConsoleCommands.Empty;
+import dev.agentcraft.client.console.ConsoleCommands.ForemanCtl;
 import dev.agentcraft.client.console.ConsoleCommands.Goal;
 import dev.agentcraft.client.console.ConsoleCommands.Help;
 import dev.agentcraft.client.console.ConsoleCommands.Intent;
@@ -31,6 +32,8 @@ import dev.agentcraft.client.foreman.Protocol.Task;
 import dev.agentcraft.client.foreman.Protocol.TaskStatus;
 import dev.agentcraft.client.hud.HudSounds;
 import dev.agentcraft.client.hud.UiBits;
+import dev.agentcraft.client.launcher.Launcher;
+import dev.agentcraft.launcher.LauncherPlan;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -146,6 +149,11 @@ public final class ConsoleActions {
 				clearFeedback();
 				DecisionsFeature.openQueue(d.decisionId(), net.minecraft.client.Minecraft.getInstance().gui.screen());
 				return After.CLOSE;
+			}
+			case ForemanCtl f -> {
+				ConsoleLog.remember(raw);
+				foremanCtl(f.action());
+				return After.CLEAR;
 			}
 			case ShowDiff d -> {
 				ConsoleLog.remember(raw);
@@ -291,8 +299,93 @@ public final class ConsoleActions {
 			+ dev.agentcraft.client.hud.Keys.label(dev.agentcraft.client.hud.Keys.decisions) + " decisions \u00b7 Esc close (your draft is kept)");
 	}
 
+	/**
+	 * {@code /foreman}: what the game's Foreman launcher is doing, and its controls. Start / restart / stop run on the
+	 * launcher's own thread; the console reports what was asked and the pill shows the progress.
+	 */
+	private static void foremanCtl(String action) {
+		LauncherPlan.State st = Launcher.state();
+		switch (action) {
+			case "start" -> {
+				if (Launcher.busy()) {
+					setFeedback("the launcher is already " + st.wire(), Tone.INFO, false);
+					return;
+				}
+				if (st == LauncherPlan.State.RUNNING || st == LauncherPlan.State.RUNNING_OLDER) {
+					setFeedback("a Foreman is already running (pid " + Launcher.pid() + "); /foreman restart restarts one the game started", Tone.INFO, false);
+					return;
+				}
+				Launcher.start();
+				ConsoleLog.add(Tone.INFO, "Starting the Foreman (checking the port, then starting one if needed). Watch the pill; /foreman shows the details.");
+				clearFeedback();
+			}
+			case "restart" -> {
+				if (!Launcher.ours()) {
+					setFeedback("the running Foreman was not started by the game (" + st.wire() + "); restart it with the tool that started it", Tone.ERROR, false);
+					return;
+				}
+				Launcher.restart();
+				ConsoleLog.add(Tone.INFO, "Restarting the Foreman the game started (pid " + Launcher.pid() + ").");
+				clearFeedback();
+			}
+			case "stop" -> {
+				if (!Launcher.ours() || Launcher.pid() <= 0) {
+					setFeedback("nothing to stop: the running Foreman was not started by the game", Tone.ERROR, false);
+					return;
+				}
+				Launcher.stop();
+				ConsoleLog.add(Tone.INFO, "Stopping the Foreman the game started (pid " + Launcher.pid() + "). /foreman start brings it back.");
+				clearFeedback();
+			}
+			case "log" -> {
+				if (Launcher.openLog()) {
+					ConsoleLog.add(Tone.INFO, "Opened " + Launcher.logFile());
+					clearFeedback();
+				} else {
+					setFeedback("no launcher log yet" + (Launcher.logFile() == null ? "" : " (" + Launcher.logFile() + ")"), Tone.ERROR, false);
+				}
+			}
+			default -> {
+				ConsoleLog.add(Tone.HEADER, "Foreman launcher");
+				ConsoleLog.add(st == LauncherPlan.State.CRASHED || st == LauncherPlan.State.BLOCKED || st == LauncherPlan.State.NODE_MISSING
+					|| st == LauncherPlan.State.NO_SOURCE ? Tone.ERROR : Tone.INFO, Launcher.summaryLine());
+				var src = Launcher.source();
+				if (src != null && src.root() != null) {
+					ConsoleLog.add(Tone.INFO, "runs from " + src.root() + " (" + src.origin() + "), profile " + Launcher.profile() + ", port " + Launcher.port()
+						+ ", backend " + Launcher.backend());
+				}
+				if (!Launcher.stale().isEmpty()) {
+					ConsoleLog.add(Tone.INFO, "older: " + String.join("; ", Launcher.stale()));
+				}
+				if (Launcher.installLine() != null) {
+					ConsoleLog.add(Tone.INFO, "npm: " + Launcher.installLine());
+				}
+				if (Launcher.installNote() != null) {
+					ConsoleLog.add(Tone.INFO, Launcher.installNote());
+				}
+				for (String l : Launcher.logTail()) {
+					ConsoleLog.add(Tone.FILE, l);
+				}
+				for (String p : Launcher.config().problems()) {
+					ConsoleLog.add(Tone.ERROR, "config.json: " + p);
+				}
+				if (Launcher.logFile() != null) {
+					ConsoleLog.add(Tone.INFO, "log: " + Launcher.logFile() + " (/foreman log opens it)");
+				}
+				ConsoleLog.add(Tone.HELP, "/foreman start\tstart (or reuse) a Foreman"
+					+ (Launcher.ours() ? "   /foreman restart | stop\tthe one the game started" : "   (restart / stop apply to one the game started)"));
+				clearFeedback();
+			}
+		}
+	}
+
 	private static void status(ForemanState s) {
 		ConsoleLog.add(Tone.HEADER, "Status");
+		LauncherPlan.State ls = Launcher.state();
+		if (ls != LauncherPlan.State.IDLE && ls != LauncherPlan.State.DISABLED && (!s.hasData() || ls != LauncherPlan.State.RUNNING)) {
+			ConsoleLog.add(ls == LauncherPlan.State.RUNNING_OLDER || ls == LauncherPlan.State.STARTING || ls == LauncherPlan.State.INSTALLING ? Tone.INFO
+				: Tone.ERROR, Launcher.summaryLine() + "  (/foreman for details)");
+		}
 		if (!s.hasData()) {
 			ConsoleLog.add(Tone.ERROR, "no data from the Foreman yet");
 			return;

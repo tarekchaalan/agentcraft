@@ -37,6 +37,7 @@ back the next time it opens (this session), and the console terminal shows it on
 | `/task <id> cancel\|retry\|prioritize [n]\|reassign @x` | `task.action` |
 | `/diff [worktree\|@agent\|task]` | opens the diff screen (`diff`, owned by the diff feature); without one, prints a file summary from `diff.request` |
 | `/status`, `/help`, `/decide`, `/clear`, `/sound on\|off` | local |
+| `/foreman [start\|restart\|stop\|log]` | local: the Foreman the game starts (mod/DEV.md "Foreman launcher"). Alone: its state, checkout, why an older one is left running, npm progress, the log's last lines. `start` starts (or reuses) one; `restart` and `stop` only touch one the game started; `log` opens its log |
 
 Tab completes agent names (also after `/pause` etc.), commands, decision ids and options, task ids
 and worktrees; repeated Tab cycles, Up/Down move in the popup. Up/Down otherwise walk the history

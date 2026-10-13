@@ -54,11 +54,40 @@ dependencies {
 	include("org.java-websocket:Java-WebSocket:${project.java_websocket_version}") {
 		exclude group: 'org.slf4j'
 	}
+
+	// Unit tests (src/test/java) for pure logic without a game: the Foreman launcher's decisions (dev.agentcraft.launcher).
+	testImplementation platform("org.junit:junit-bom:${project.junit_version}")
+	testImplementation "org.junit.jupiter:junit-jupiter"
+	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+test {
+	useJUnitPlatform()
+	testLogging {
+		events "failed"
+		exceptionFormat "full"
+	}
+}
+
+// The checkout this jar is built from, as a resource: the Foreman launcher's last-resort source when neither
+// AGENTCRAFT_FOREMAN_DIR nor launcher.foremanDir is set (mod/DEV.md "Foreman launcher"). A path only, no commit: the
+// launcher asks git for the checkout's commit when it starts.
+def buildInfoDir = layout.buildDirectory.dir("generated/agentcraft-build")
+def buildCheckout = rootProject.projectDir.parentFile.absolutePath
+def buildInfo = tasks.register("agentcraftBuildInfo") {
+	inputs.property "checkout", buildCheckout
+	outputs.dir buildInfoDir
+	doLast {
+		def f = buildInfoDir.get().file("agentcraft-build.properties").asFile
+		f.parentFile.mkdirs()
+		f.text = "# the checkout this jar was built from (the Foreman launcher's fallback source)\ncheckout=" + buildCheckout.replace('\\', '\\\\') + "\n"
+	}
 }
 
 processResources {
 	def version = project.version
 	inputs.property "version", version
+	from(buildInfo)
 
 	filesMatching("fabric.mod.json") {
 		expand "version": version

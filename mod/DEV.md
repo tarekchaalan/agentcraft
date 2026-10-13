@@ -86,7 +86,12 @@ Delete `mod/run/saves/AgentCraft HQ` to start over with a fresh world.
 | `AGENTCRAFT_DEV_ALLOW_ORIGIN` | 0 | `1` lets browser pages (which send an Origin header) connect. They are refused by default |
 | `AGENTCRAFT_DEV_TEST` | 0 | `1` registers test-only commands (`dev.test.stall`, which blocks the render thread to simulate a hung game; `dev.test.foremanMessage`). Never set it for real use |
 | `AGENTCRAFT_PORT` | 7878 | Foreman WebSocket port the mod connects to (always 127.0.0.1) |
-| `AGENTCRAFT_FOREMAN` | 1 | `0` disables the Foreman link (the HUD says so) |
+| `AGENTCRAFT_FOREMAN` | 1 | `0` disables the Foreman link (the HUD says so) and the Foreman launcher |
+| `AGENTCRAFT_LAUNCHER` | config.json `launcher.enabled` (true) | `0`: the mod does not start the Foreman when the game starts (`/foreman start` in the console still can). `tools/launch.ps1 -NoForeman` and `tools/unix.mjs --no-foreman` set `0` unless you set it yourself. See "Foreman launcher" |
+| `AGENTCRAFT_LAUNCHER_STOP_ON_EXIT` | config.json `launcher.stopOnExit` (false) | `1`: stop the Foreman when the game exits, and only one the mod started |
+| `AGENTCRAFT_FOREMAN_DIR` | `launcher.foremanDir`, else a dev run's own checkout, else the checkout the jar was built from | The checkout (or its `foreman/`) the launcher runs the Foreman from |
+| `AGENTCRAFT_NODE` | `launcher.nodePath`, else discovered | Node 22+ binary (or its folder) for the launcher |
+| `AGENTCRAFT_HOME`, `AGENTCRAFT_PROFILE`, `AGENTCRAFT_BACKEND` | `~/.agentcraft`, the backend's name, `claude` | Which Foreman the launcher looks for and starts (`--home`, `--profile`, `--backend`); tools/launch.ps1 passes the first two |
 
 "Dev run" is `gradlew runClient` (`FabricLoader.isDevelopmentEnvironment()`); "jar" is a built jar
 installed in a normal launcher, which is someone's everyday game: there the mod opens no world, keeps
@@ -140,7 +145,7 @@ treated the same, other binary frames get an `ok:false` reply).
 |---|---|---|
 | `dev.ping` | (none) | `{pong, frame, msSinceLastFrame, stalled, quitting}`. Answered on the socket thread, so it answers while the game loads **and while it is hung**. `stalled:true` = the render thread has not finished a frame for 5 s (QA: relaunch) |
 | `dev.help` | (none) | All commands with help text, plus registered screens |
-| `dev.state` | (none) | `inWorld`, **`ready`** (in a world with no loading screen or overlay: safe to shoot), `paused` (a pausing screen is open, so the integrated server is stopped), `screen{class,title}` or null, `fps`, `frame`, `window{width,height,framebufferWidth/Height,renderWidth/Height,guiScale,focused,osForeground,iconified}`, `hudHidden`, `fov` (what the last frame was rendered with), `fovOption` (the player's setting), `fovPin` (dev camera pin, null = none), `cameraType`, `audio{master,music}`, `player{name,x,y,z,eyeY,yaw,pitch,flying,gameMode}`, `camera{x,y,z,yaw,pitch,fov}`, `world{name,dimension,time,raining,thundering}`, `chunks{renderedAll,lightQueue,loadedAll,renderDistance}` (player/camera/world/chunks are null outside a world), `foreman{link, connected, url, attempt, lastError, phaseForMs, everSynced, snapshots, messages, lastMessageAgoMs, stale, backend, auth, message, version, counts{agents, activeAgents, tasks, openTasks, decisions, openDecisions, repos, memory, goals, feed}, goal?, oldestOpenDecision}`, `agents{count, moving, pathFailures, plates, plateOverlaps, plateLayoutUs}` (plates = nameplates laid out last frame, plateOverlaps = pairs of drawn plates overlapping on screen last frame, 0 when settled; plateLayoutUs = mean cost of the declutter pass) |
+| `dev.state` | (none) | `inWorld`, **`ready`** (in a world with no loading screen or overlay: safe to shoot), `paused` (a pausing screen is open, so the integrated server is stopped), `screen{class,title}` or null, `fps`, `frame`, `window{width,height,framebufferWidth/Height,renderWidth/Height,guiScale,focused,osForeground,iconified}`, `hudHidden`, `fov` (what the last frame was rendered with), `fovOption` (the player's setting), `fovPin` (dev camera pin, null = none), `cameraType`, `audio{master,music}`, `player{name,x,y,z,eyeY,yaw,pitch,flying,gameMode}`, `camera{x,y,z,yaw,pitch,fov}`, `world{name,dimension,time,raining,thundering}`, `chunks{renderedAll,lightQueue,loadedAll,renderDistance}` (player/camera/world/chunks are null outside a world), `foreman{link, connected, url, attempt, lastError, phaseForMs, everSynced, snapshots, messages, lastMessageAgoMs, stale, backend, auth, message, version, counts{agents, activeAgents, tasks, openTasks, decisions, openDecisions, repos, memory, goals, feed}, goal?, oldestOpenDecision}`, `launcher{state, pid, ours, enabled}` (the Foreman launcher, `dev.launcher.state` has the rest), `agents{count, moving, pathFailures, plates, plateOverlaps, plateLayoutUs}` (plates = nameplates laid out last frame, plateOverlaps = pairs of drawn plates overlapping on screen last frame, 0 when settled; plateLayoutUs = mean cost of the declutter pass) |
 | `dev.camera` | `anchor?` (fills x/y/z/yaw/pitch from the published layout, see `dev.anchors`; `cam_*` anchors are eye positions, other anchors feet positions; explicit fields win), `x,y,z` + (`yaw,pitch` **or** `lookAt:{x,y,z}`, lookAt wins), `fov?` (30-110, may be fractional; **default: the player's FOV option**), `mode?` = `spectator` (default) / `creative` (flying) / `keep`, `feet?` (default false: x,y,z is the **eye** position), `hideHud?`, `closePause?` (default true: closes a vanilla pause menu first) | Validates first: all numbers finite; `pitch` in [-90, 90]; `yaw` any finite value (wrapped to [-180, 180)); `y` in [-20000000, 19999999] (vanilla `/tp`'s limit); x/z inside the **world border** (±29999984); lookAt not equal to the eye. Then forces first person, stops spectating other entities, teleports on the server thread, waits until the client has the exact position, pins position and rotation with no interpolation, and **only replies ok once a rendered frame used exactly the requested eye position (±0.01), rotation (±0.05°) and FOV**; otherwise `ok:false` with wanted vs got (`mode:keep` skips that check, since walking players fall). Returns the actual `camera{x,y,z,yaw,pitch,fov}`. Yaw: 0 = +Z (south), 90 = -X (west), -90 = +X (east). Pitch: positive looks down. **FOV pin:** each call renders with exactly its `fov` (or the option), ignoring vanilla's dynamic FOV (flying widens it by 1.1x, so before this pin a "70" shot really rendered at 77). Nothing carries over between calls and `options.txt` is never touched |
 | `dev.release` | `mode?` = `creative` (default) / `keep` | Hands the view back to the player: clears the FOV pin (vanilla FOV again), shows the HUD, spectator -> creative (flying, so you don't fall) |
 | `dev.screenshot` | `name` (letters, digits, `_ - . /`; `.png` added), `hideHud?` (default true), `frames?` (3, 1-600), `waitChunks?` (true), `chunkRadius?` (whole render distance, 0-64), `chunkTimeoutMs?` (30000, 0-600000) | Hides the HUD, waits until all chunks within the render distance are loaded and meshed and the light queue is empty for 5 consecutive frames, waits N more frames, then copies the **main render target** (the framebuffer, so it doesn't depend on window focus or overlap). Writes the PNG and restores the HUD. Returns `{path, width, height, ms, chunksTimedOut, paused, stats{meanLuma,stdLuma,darkFraction}}`. Use the stats to catch black frames. Open screens are included in the capture. `width`/`height` are **not supported** (the shot is the window framebuffer size, 1920x1080). The default request timeout grows with `chunkTimeoutMs` and `frames` |
@@ -156,6 +161,8 @@ treated the same, other binary frames get an `ok:false` reply).
 | `dev.quit` | `forceAfterMs?` (15000, 1000-600000) | Replies `{quitting, alreadyQuitting, renderThreadStalled, forceAfterMs}`, then calls `mc.stop()` 250 ms later: the world saves and the JVM exits (about 1-2 s). **Watchdog:** if the render thread is hung and has not run the stop after `forceAfterMs`, it logs the render thread's stack, stops the integrated server (which saves the world), then halts the JVM with **exit code 3** (`runClient` then ends with BUILD FAILED). If a normal shutdown is still running after 90 s it does the same with exit code 4 |
 | `dev.test.stall` | `ms` (1-600000) | **Test only** (`AGENTCRAFT_DEV_TEST=1`): blocks the render thread to simulate a hang |
 | `dev.foreman` | `reconnect?` (false) | The Foreman link + model summary (same as `dev.state.foreman`); `reconnect:true` drops the connection and connects again now |
+| `dev.launcher.state` | (none) | The Foreman launcher (see "Foreman launcher"): `state` (`idle`, `disabled`, `checking`, `node-missing`, `no-source`, `installing`, `starting`, `running`, `running-older`, `crashed`, `blocked`, `stopped`), `detail`, `action` (`reuse`, `reuse_older`, `start`, `restart`, `port_taken`, `profile_busy`), `pid`, `wrapperPid`, `how` (`hidden-console`/`detached`), `ours`, `startedThisSession`, `runningBy`, `runningRoot`, `runningCommit`, `runningVersion`, `stale[]`, `source`, `sourceOrigin`, `sourceProblem`, `expectedCommit`, `node`, `nodeVersion`, `profile`, `port`, `backend`, `home`, `log`, `record`, `enabled`, `stopOnExit`, `configProblems[]`, `installLine`, `installNote`, `logTail[]` |
+| `dev.launcher.start` / `dev.launcher.restart` / `dev.launcher.stop` | (none) | Run the launch sequence (reuse, start or report) / restart / stop the Foreman the game started; restart and stop are refused (`ok:false`) for one it did not start. They reply at once with the state; poll `dev.launcher.state` |
 | `dev.foreman.send` | `message:{type, ...}` | Sends a client message (docs/protocol.md "Mod -> Foreman") through the mod's own link and replies `{ack:{re, ok, error?, result?}}`. Example: `{message:{type:"goal.submit", text:"Add #tags"}}`, `{message:{type:"decision.answer", decisionId:"d3", option:"Merge"}}` |
 | `dev.foreman.inject` | exactly one of `message:{type,...}`, `patch:{agent\|task: id, set:{wire fields}}`, `say:{agent, text, to?}` | Applies to the mod's Foreman model **as if the Foreman had sent it** (always available; bypasses the hold queue). `patch` copies the current agent/task, replaces the given wire fields (`{"station":"desk","state":"editing"}`, `{"status":"doing","assignee":"marlow"}`, `null` clears) and applies it as an `agent.upsert`/`task.upsert`; `say` is an `agent.say` stamped now. Replies `{applied, message}`. Video choreography; the next snapshot (reconnect) undoes it |
 | `dev.foreman.hold` | `on` (bool), `release?` = `reconnect` (default) / `replay` / `drop` | `on:true`: live Foreman messages are queued instead of applied, so a shot shows only what it injects. `on:false` releases them: `reconnect` drops the queue and reconnects (fresh snapshot), `replay` applies the queue, `drop` discards it. `dev.state.foreman.held/heldQueued` show it |
@@ -283,6 +290,105 @@ A killed Foreman is noticed at once (connection reset) and its restart is picked
 backoff (about 3 s in the Phase 2 test). The model keeps the last known state while disconnected
 (`isStale()`): agents stay in place with a dimmed "Foreman offline" plate and the HUD says
 "Reconnecting to the Foreman".
+
+### Foreman launcher
+The mod starts the Foreman itself when the game starts, so a jar in Prism (or a bare `gradlew
+runClient`) needs no terminal. `client.launcher.Launcher` does the I/O on its own daemon thread;
+the decisions are pure functions in `dev.agentcraft.launcher.LauncherPlan` (unit tests:
+`gradlew test`), the settings are `LauncherConfig`, the process plumbing is `LauncherProcs`. Ported
+from larattalabs/agentcraft-worlds (branch `mod/foreman-launcher` and its fixes) onto this structure:
+no hub, so the console's `/foreman` and the HUD pill replace its Status tab.
+
+1. **Settings**: the `launcher` section of `<home>/config.json` (the Foreman's file; the mod only
+   reads it), every key optional, overrides in the env table above (or `-Dagentcraft.launcher`,
+   `-Dagentcraft.foreman.dir`, `-Dagentcraft.node`, `-Dagentcraft.launcher.stop.on.exit`):
+   ```json
+   "launcher": { "enabled": true, "foremanDir": "~/code/agentcraft", "nodePath": "C:\\nvm4w\\nodejs\\node.exe", "stopOnExit": false }
+   ```
+   Problems in it are logged and listed by `/foreman`; the defaults apply.
+2. **Checkout** (where foreman/ is): `AGENTCRAFT_FOREMAN_DIR`, then `launcher.foremanDir` (an
+   explicit folder that is not a checkout stops here with a message: never silently another), then a
+   dev run's own checkout (`<repo>/mod/run` is the game dir), then the checkout the jar was built from
+   (`agentcraft-build.properties`, written by the `agentcraftBuildInfo` task in build.gradle). A jar
+   (not a dev run) refuses a checkout that is, sits inside, or shares its Git common dir with a
+   repository the agents work on (config.json `repos` and the profile's repos in `state.json`): agents
+   merge into it, so the everyday Foreman's code would change under it. Set `launcher.foremanDir` to a
+   separate checkout then.
+3. **What is on the port**: a `hello` (client `launcher`); a `snapshot` reply means a Foreman. Its
+   identity comes from the run files `<home>/*/foreman.json` on our port, which now also record
+   `root` (the checkout) and `commit` (`git rev-parse HEAD` at start; foreman/src/main.ts). Who started
+   it: the mod's record `<home>/<profile>/launcher.json` (pid and process start time), else
+   tools/launch.ps1's `artifacts/run/foreman-<profile>-*.json` or tools/unix.mjs's
+   `unix-foreman-<profile>.json` in the checkout.
+4. **Decision** (`LauncherPlan.decide`). "Ours" is only the very process `launcher.json` names (same pid
+   and start time); "current" means same checkout (real paths) and same commit as the checkout now.
+
+   | on the port | ours | current | what the launcher does (state) |
+   |---|---|---|---|
+   | a Foreman | either | yes | reuse it (`running`) |
+   | a Foreman | no | no | reuse it, never stop it (`running-older`: "running (older version)", with the reasons) |
+   | a Foreman | yes | no | restart it (`starting`) |
+   | nothing | no | | start one (`installing`/`starting`), unless the profile runs on another port (`blocked`) |
+   | nothing, or no answer | yes (alive) | | restart it (hung) |
+   | something else | no | | leave it (`blocked`: free the port or set `AGENTCRAFT_PORT`) |
+5. **Starting**: node 22+ from `launcher.nodePath`, then PATH, then fixed places (Windows:
+   `%ProgramFiles%\nodejs`, `%LOCALAPPDATA%\Programs\nodejs`, nvm-windows' `%NVM_SYMLINK%` and
+   `C:\nvm4w\nodejs`, Volta; macOS/Linux: Homebrew, `/usr/local/bin`, mise, Volta, nvm (newest),
+   asdf, fnm, `/usr/bin`), then the shell (`where.exe node`, `$SHELL -lc 'command -v node'`). Then
+   `npm ci --no-audit --no-fund` (as `node npm-cli.js`, no shell) in foreman/ when node_modules is
+   missing or `package-lock.json` changed since the launcher's last install (its hash is kept in
+   `node_modules/.agentcraft-lock.sha256`); output in `artifacts/logs/foreman-launcher-npm.log`. Like
+   launch.ps1 it does not reinstall while another Foreman of the checkout runs on node_modules. Then
+   `node --import tsx src/main.ts --backend B --profile P --home H --port N` in foreman/, output appended
+   to `artifacts/logs/foreman-launcher-<profile>.log` (rotated at 5 MB):
+   - **Windows**, as tools/launch.ps1 does it: PowerShell `Start-Process -WindowStyle Hidden`
+     (ShellExecute) runs `node tools/lib/bgrun.mjs <spec>`, which runs the Foreman in its own hidden
+     console (`artifacts/run/mod-launcher-<profile>.spec.json` / `.status.json`; not `foreman-*`, so
+     stop.ps1 never takes them for its own). So the agents' console programs share that console
+     instead of each opening a window, the Foreman never holds the game's stdout (`gradlew runClient`
+     ends with the game, not with the Foreman), and Ctrl+Break stops it cleanly. A checkout without
+     bgrun.mjs falls back to the node helper below; that Foreman has no console and can only be killed.
+   - **macOS / Linux**: a tiny node helper (`LauncherPlan.SPAWN_SCRIPT`) spawns it detached (its own
+     session), with the login shell's environment added (`$SHELL -lic`, then `-lc`; PATH = node's
+     folder, the login PATH, the Homebrew/mise fallbacks, the game's PATH).
+
+   The game's own switches (`AGENTCRAFT_DEV*`, `_MUTE`, `_FOCUS`, `_AUTOWORLD`, `_LAUNCHER*`,
+   `_FOREMAN_DIR`, `_NODE`, ...) are kept out of its environment; other `AGENTCRAFT_*` reach it as from
+   a terminal (its command line wins). The launcher waits up to 120 s for the port, records pid and
+   start time in `launcher.json`, and makes the link reconnect at once.
+6. **Afterwards** it follows the pid. Ours exiting is `crashed` (toast; `/foreman` shows the log's last
+   lines); a reused one exiting is `stopped`; another Foreman taking over the run file within 15 s is
+   reused, never adopted as ours (the Foreman does not restart itself, so someone else started that
+   one). When the link comes back after `stopped`/`crashed` it looks again, starting nothing.
+7. **Stopping** (`/foreman stop`, `/foreman restart`, the restart of a stale one, and at game exit only
+   with `launcher.stopOnExit`) touches only the process `launcher.json` names (a reused pid is never
+   touched): Ctrl+Break into its console on Windows (tools/lib/procs.ps1's helper, through PowerShell),
+   SIGTERM elsewhere; the Foreman saves its state and releases its run file. After 8 s it and its
+   children are killed. At game exit the game waits only for the request to be delivered (at most
+   4 s; on Windows PowerShell compiles the helper, about 1 s), never for the Foreman, and never kills.
+
+By default the Foreman keeps running after the game exits (agents keep working) and the next game
+reuses it.
+
+**With the launch scripts**: tools/launch.ps1 and tools/unix.mjs start (or reuse) the Foreman before
+the game, so the launcher finds it and reuses it (`/foreman`: "reused: started by tools\launch.ps1");
+tools\stop.ps1 stops it as before. `-NoForeman` / `--no-foreman` turn the launcher off unless the
+caller set `AGENTCRAFT_LAUNCHER`: `$env:AGENTCRAFT_LAUNCHER='1'; tools\launch.ps1 -NoForeman` lets a
+dev client start its own Foreman, which is how to try the launcher in a dev run.
+
+**Where it shows**: the HUD pill while not linked ("Looking for the Foreman…", "Installing the
+Foreman's packages…", "Starting the Foreman…", "The Foreman stopped", "Foreman needs Node.js 22+",
+"Foreman could not start"; it replaces "Reconnecting" when it knows more) and "running (older
+version)" under a linked pill; the console's `/foreman` (state, checkout, stale reasons, npm progress,
+log tail, config problems; `start`, `restart` and `stop` for one the game started, `log` opens the
+log) and a line in `/status`; toasts for crashed, node missing and blocked; `Foreman launcher: ...`
+lines in the game log; `dev.launcher.state`.
+
+Verified on 2026-10-13, outside the game: the unit tests; on Windows 11, a sim Foreman started through
+`LauncherProcs.startHidden` (spawned in 0.5 s, port open in 3.5 s, run file with `root` and `commit`,
+its parent the bgrun wrapper, and the starting JVM exited at once with its stdout piped), then
+stopped by `requestStop` (Ctrl+Break: "SIGBREAK: shutting down" within 0.8 s, run file released);
+the detached fallback is stopped by force. **Not yet exercised in a running game.**
 
 ### Agents: client-side entities (architecture A), decided by measurement
 Two options were prototyped in the Phase 2 test room on the same six anchor-to-anchor routes

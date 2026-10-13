@@ -21,7 +21,9 @@ one component; `--no-wait` to return immediately while Minecraft builds. Repeat
 `artifacts/logs/unix-*.log` and `artifacts/run/unix-*.json`. `stop` only signals processes
 recorded by this launcher. Agent decisions show a desktop notification (Notification Center on
 macOS, `notify-send` on Linux). The screenshot QA command, `node tools/qa.mjs`, also uses this
-launcher on macOS and Linux.
+launcher on macOS and Linux. The mod's own Foreman launcher (mod/DEV.md "Foreman launcher") finds
+the Foreman `unix.mjs` started and leaves it alone; with `--no-foreman` the game gets
+`AGENTCRAFT_LAUNCHER=0` (export `AGENTCRAFT_LAUNCHER=1` first to let the game start its own).
 
 ### Your own launcher instance (Prism, MultiMC, ...)
 
@@ -32,8 +34,17 @@ The mod also runs in a normal Fabric instance for Minecraft 26.3 with Fabric Loa
    `mod/gradle.properties`) into the instance's `mods/` folder.
 2. Set the instance's environment variables `AGENTCRAFT_MUTE=0` (otherwise the mod forces your
    master and music volume to 0) and `AGENTCRAFT_FOCUS=1`. See mod/DEV.md for the rest.
-3. Start only the Foreman: `node tools/unix.mjs launch --no-game --backend sim` (or `--repo ...`).
-4. Launch the instance. The title screen loads (or creates) the `AgentCraft HQ` world.
+3. Launch the instance. The title screen loads (or creates) the `AgentCraft HQ` world.
+
+The mod starts the Foreman itself (mod/DEV.md "Foreman launcher"): from the checkout the jar was
+built from, or the one `launcher.foremanDir` in `~/.agentcraft/config.json` names (or
+`-Dagentcraft.foreman.dir=<checkout>` in the instance's JVM arguments). It needs Node 22+ and runs
+`npm ci` in `foreman/` on first use; the HUD pill and the console's `/foreman` say what it is doing.
+The backend and profile come from `AGENTCRAFT_BACKEND` / `AGENTCRAFT_PROFILE` (default `claude`).
+The Foreman keeps running after the game exits; set `launcher.stopOnExit` to stop it with the game.
+To run the Foreman yourself instead (`node tools/unix.mjs launch --no-game --backend sim`, or
+`tools\launch.ps1 -NoGame` on Windows), start it before the game: the mod finds it and leaves it alone.
+`AGENTCRAFT_LAUNCHER=0` turns the mod's launcher off.
 
 `node tools/devcli.mjs state` reports the running game either way while the DevBridge is on.
 
@@ -68,6 +79,12 @@ If the game of this checkout is already running it is reused (one client per che
 `mod/run`). Quitting the game window leaves the Foreman running (agents keep working); the next
 `launch.ps1` reuses it.
 
+The mod has its own Foreman launcher (mod/DEV.md "Foreman launcher"): it finds the Foreman
+`launch.ps1` started (or reused) on the port and leaves it alone (the console's `/foreman` says
+"started by tools\launch.ps1"; `stop.ps1` stops it as before). With `-NoForeman` the game gets
+`AGENTCRAFT_LAUNCHER=0` so it does not start one either; set `$env:AGENTCRAFT_LAUNCHER='1'` before
+`launch.ps1 -NoForeman` to let the game start its own (how to try the launcher in a dev run).
+
 | parameter | default | |
 | --- | --- | --- |
 | `-Backend sim\|claude` | `claude` (`AGENTCRAFT_BACKEND`) | `-Showcase` implies `sim` |
@@ -81,7 +98,7 @@ If the game of this checkout is already running it is reused (one client per che
 | `-Speed x`, `-Autostart`, `-Goal "..."` | | sim speed / start the scripted goal / submit a goal at start |
 | `-ForemanArgs @('--workers','kit,wren')` | | extra Foreman flags (`npm run start -- --help`) |
 | `-Notify` / `-NoNotify` | Foreman default (on for claude) | Windows toasts |
-| `-NoGame`, `-NoForeman`, `-NoWait` | | only the Foreman / only the game / don't wait for the world |
+| `-NoGame`, `-NoForeman`, `-NoWait` | | only the Foreman / only the game (the mod's launcher off too, unless `AGENTCRAFT_LAUNCHER` is set) / don't wait for the world |
 | `-GradleHome <dir>` | `GRADLE_USER_HOME` or `<main checkout>\.gradle-home` | |
 | `-TimeoutSec N` | 600 | how long to wait for the world |
 | `-SummaryJson <file>` | | machine-readable result (what was started or reused, pids, ports, logs) |

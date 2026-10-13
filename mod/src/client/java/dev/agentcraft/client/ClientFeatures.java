@@ -8,6 +8,7 @@ import dev.agentcraft.client.diff.DiffFeature;
 import dev.agentcraft.client.foreman.ForemanFeature;
 import dev.agentcraft.client.hq.HqClientFeature;
 import dev.agentcraft.client.hud.HudFeature;
+import dev.agentcraft.client.launcher.Launcher;
 import dev.agentcraft.client.library.LibraryFeature;
 import dev.agentcraft.client.monitor.MonitorFeature;
 import dev.agentcraft.client.permissions.PermissionsFeature;
@@ -28,6 +29,7 @@ public final class ClientFeatures {
 
 	public static void init() {
 		ForemanFeature.init();   // link + state model (dev.foreman, dev.state.foreman)
+		Launcher.init();         // starts the Foreman with the game when none answers (dev.launcher.*, /foreman)
 		AnchorsDev.init();       // dev.anchors, dev.camera {anchor}
 		ItemsDev.init();         // dev.screen creative_agentcraft
 		AgentsFeature.init();    // agent NPCs, nameplates, dev.agents

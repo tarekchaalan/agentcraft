@@ -24,6 +24,7 @@ was verified in game in Phase 2 (`artifacts/shots/phase2_*.png`).
 | package | owner (Phase 3) | owns |
 |---|---|---|
 | `client.foreman` | core | WebSocket link, protocol mirror, state model, `Foreman` facade |
+| `client.launcher` + `launcher` (main) | core | the Foreman launcher (mod/DEV.md "Foreman launcher"): starts or reuses the Foreman with the game; `Launcher` (I/O, `/foreman` backend, `dev.launcher.*`), `LauncherHints` (pill text); main: `LauncherPlan` (pure decisions, unit-tested), `LauncherConfig`, `LauncherProcs` |
 | `client.agents` | agents specialist | agent NPCs: manager, motion, pathfinding, renderer, nameplate, hooks |
 | `client.hud` | hud specialist | connection banner (done), goal boss bar, in-game toasts |
 | `client.monitor` | monitor specialist | `MonitorRenderer` (BER): live agent log on desk monitors |
@@ -421,6 +422,10 @@ hard-code colours; ask `UiStyle`. Sprites are 1 texel = 1 GUI px (GUI scale 3 at
 `HudElementRegistry.addLast(AgentCraft.id("hud/<name>"), element)`. Phase 2 ships the connection
 banner (top right: "Foreman · sim" / "Reconnecting to the Foreman" / "Foreman not running"; loud
 paper banner at the top centre when claude auth failed). Phase 3: goal boss bar, toasts for `notify`.
+While the link is down the pill shows what the Foreman launcher is doing (`LauncherHints`: "Looking
+for the Foreman…", "Starting the Foreman…", "The Foreman stopped", "Foreman needs Node.js 22+", ...),
+and a linked Foreman the game did not start from this checkout and commit adds "running (older
+version)"; read `Launcher.state()` (any thread) for anything else that wants it.
 
 ## Displays (`client.monitor`, `client.taskwall`)
 

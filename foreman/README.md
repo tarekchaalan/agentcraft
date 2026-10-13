@@ -102,7 +102,9 @@ most ~100 ms of state, and interrupted agent turns resume on the next start.
 | sim: `--speed`, `--seed`, `--autostart`, `--showcase [late]`, `--auto-answer`, `--no-ambient` | | |
 
 `<home>/config.json` can hold the same settings (`{"backend":"claude","claude":{"workers":["kit","wren"]}}`).
-While running, `<home>/<profile>/foreman.json` records `{pid, port, host, backend, profile, version, startedAt}`
+While running, `<home>/<profile>/foreman.json` records `{pid, port, host, backend, profile, version, startedAt,
+root, commit}` (`root`: the checkout it runs from; `commit`: its `git rev-parse HEAD` at start, absent without
+git; the mod's Foreman launcher compares both to tell an older Foreman, mod/DEV.md "Foreman launcher")
 so launch scripts can find it; `<home>/foreman.json` holds the same for the first live Foreman (when
 it exits, another live profile takes its place). A second Foreman on a profile that is already
 running is refused (two would both write its `state.json`).
@@ -312,6 +314,7 @@ spawns git with an empty environment); the policy refuses every command it can s
 <AGENTCRAFT_HOME>/<profile>/
   state.json             agents, tasks, decisions, repos, goals, feed, messages, sessions (atomic writes)
   foreman.json           pid/port of the Foreman running this profile
+  launcher.json          what the mod's Foreman launcher started here (pid, start time, checkout; mod/DEV.md)
   logs/<agent>.jsonl     agent logs (snapshots carry the last 60 lines per agent); rotated at 8 MB
                          into <agent>.1.jsonl (one old file kept); start-up reads only their ends
   memory/shared/*.md     shared notes (hand-editable)
