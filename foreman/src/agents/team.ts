@@ -29,7 +29,7 @@ import { ClientError, type Backend, type Foreman } from '../foreman.js';
 import { withGitSafety } from '../gitsafety.js';
 import { agentGitIdentity } from '../util/git.js';
 import { classifyToolUse, describeRuleKey, describeToolCall, type PolicyContext } from '../policy.js';
-import type { BackendName, Decision, Goal, Task } from '../protocol.js';
+import type { BackendName, Decision, Goal, Task, Usage } from '../protocol.js';
 import { MERGE_OPTIONS, PERMISSION_OPTIONS } from '../protocol.js';
 import type { TestResult } from '../repos.js';
 import { renderDiffText } from '../diff.js';
@@ -39,7 +39,7 @@ import { truncate } from '../util/text.js';
 import { leadSystemPrompt, planPrompt, RESUME_PROMPT, reviewPrompt, workerSystemPrompt, workPrompt } from './prompts.js';
 import { fetchPulls, githubOrigin, prRefs, pullBriefs, type PullRequest } from '../pulls.js';
 import type { AuthCheck, Engine, EngineId, PermissionGate, RateLimitReport, Role, TurnSpec, TurnStats } from './engine.js';
-import { limitFamilyFromText, limitFromText, limitModelFamily, modelFamily } from './limits.js';
+import { limitFamilyFromText, limitFromText, limitModelFamily, modelFamily, usageWindowFamily } from './limits.js';
 import { agentTools, type ToolHooks, type TurnHandle } from './tools.js';
 import { modelLabel } from './models.js';
 import { UsagePoller } from './usage.js';
@@ -79,16 +79,40 @@ interface ClaudeState {
   ciFixes: Record<string, number>;
   /** agents the user stopped (off shift until resume/spawn) */
   stopped: string[];
-  /** a usage limit was hit: no turn starts until `until` (epoch ms) */
+  /**
+   * an account-wide usage limit was hit (the plan's 5-hour, weekly or credit limit, or one that names
+   * no model): no turn starts until `until` (epoch ms). A model's own limit is never kept here (see
+   * modelLimits; loadLimits moves one that an older Foreman saved here).
+   */
   limit?: { until: number; type?: string };
+  /**
+   * a model family's own usage limit, by family ("fable": the Fable weekly limit, rate-limit type
+   * seven_day_overage_included; "opus", "sonnet"): only the agents whose next turn runs that family
+   * wait until it resets (a lead on it with claude.leadFallback runs the fallback instead); everyone
+   * else keeps working.
+   */
+  modelLimits?: Record<string, ModelLimit>;
   /** the plan warned about usage: fewer workers at once until `until` */
   throttle?: { until: number; type?: string };
   /**
    * the lead's own model (`model`, claude.leadModel) hit a usage limit of that model's family
-   * (`family`, e.g. "fable"): the lead runs claude.leadFallback until `until`, then its own model
-   * again; nobody else waits. `guessed`: the limit did not say when it resets (a usage poll may).
+   * (`family`, e.g. "fable"): the lead runs claude.leadFallback until `until` (that limit's own,
+   * modelLimits[family]), then its own model again; nobody else waits. `guessed`: the limit did not
+   * say when it resets (a usage poll may).
    */
   leadFallback?: { until: number; model: string; family: string; type?: string; guessed?: boolean };
+}
+
+/** A model family's own usage limit (ClaudeState.modelLimits). */
+interface ModelLimit {
+  /** epoch ms */
+  until: number;
+  /** the rate-limit type it was reported with (none when only the usage poll saw it) */
+  type?: string;
+  /** no reset time was given: `until` is a wait that doubles per hit (a usage poll may give the real one) */
+  guessed?: boolean;
+  /** only the usage poll saw it (the model's weekly window full), no refused turn: a later poll that shows room lifts it */
+  fromUsage?: boolean;
 }
 
 /** Which turn a usage limit came from (the lead's fallback applies only to the lead on its own model). */
@@ -96,6 +120,8 @@ interface TurnOrigin {
   agentId: string;
   /** the turn ran the lead's fallback */
   fallback: boolean;
+  /** the model the turn was started with (configured, or the lead's fallback) */
+  model?: string;
   /** the model the turn reported (e.g. "claude-fable-5-1"), if it did */
   reported?: string;
 }
@@ -134,6 +160,9 @@ function clock(ms: number): string {
 }
 
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** " (seven day overage included)" for a rate-limit type, "" for none */
+const typeText = (type: string | undefined) => (type ? ` (${type.replace(/_/g, ' ')})` : '');
 
 function alive(child: ChildProcess | undefined): child is ChildProcess {
   return !!child && child.exitCode === null && child.signalCode === null;
@@ -214,8 +243,10 @@ export class TeamBackend implements Backend {
   /** fires when a usage limit / throttle window ends */
   private limitTimer: NodeJS.Timeout | undefined;
   private limitBackoffMs = LIMIT_BACKOFF_MS;
-  /** the lead's fallback after a limit of its own model that did not say when it resets (doubles per hit) */
-  private fallbackBackoffMs = LIMIT_BACKOFF_MS;
+  /** per model family: the wait after a limit of its own that did not say when it resets (doubles per hit, reset when a turn on it succeeds) */
+  private familyBackoffMs = new Map<string, number>();
+  /** the model the lead's own (not fallback) turns reported, for a lead model that names no family ("default") */
+  private leadOwnReported: string | undefined;
   /** the last rate-limit status each plan window reported (a change refreshes the usage display) */
   private rateLimitStatus = new Map<string, RateLimitReport['status']>();
   private readonly pullFetcher: PullFetcher;
@@ -328,6 +359,8 @@ export class TeamBackend implements Backend {
     const spent = Object.values(this.fm.store.data.sessions).reduce((sum, s) => sum + (s.costUsd || 0), 0);
     if (spent > 0) this.fm.setStatus({ costUsd: Math.round(spent * 1000) / 1000 });
     this.startLeadFallback();
+    // before anything is queued: a model's limit saved before the restart holds only that model's agents
+    this.loadLimits();
     this.showEngines();
     const authed = await this.checkAuth();
     this.showEngines(); // the auth check may have learned the configured model
@@ -347,6 +380,7 @@ export class TeamBackend implements Backend {
   async checkAuth(): Promise<boolean> {
     if (this.opts.skipAuthCheck) {
       this.fm.setStatus({ auth: 'ok', message: this.teamLabel() });
+      this.showBanner();
       return true;
     }
     const engines = this.enginesInUse();
@@ -367,6 +401,7 @@ export class TeamBackend implements Backend {
     }
     this.authFailed = false;
     this.fm.setStatus({ auth: 'ok', account: accounts.join(' · '), authMode: modes.join(' · '), message: this.teamLabel() });
+    this.showBanner(); // who waits for a model's own limit, if anyone
     return true;
   }
 
@@ -383,7 +418,7 @@ export class TeamBackend implements Backend {
       poll: () => engine.usage!(),
       publish: (usage) => {
         this.fm.setStatus({ usage });
-        this.refineFallbackReset();
+        this.applyUsage(usage);
       },
       busy: () => this.usageBusy(),
       log: this.fm.log,
@@ -584,10 +619,63 @@ export class TeamBackend implements Backend {
   }
 
   // ---- usage limits -------------------------------------------------------------------------
+  //
+  // An account-wide limit (the plan's 5-hour, weekly or credit limit, or a limit that names no
+  // model) holds everyone: st.limit. A model family's own limit (its weekly window: the Fable limit,
+  // the Opus or Sonnet limit) holds only the agents whose next turn runs that family:
+  // st.modelLimits[family]. A lead on that family with claude.leadFallback runs the fallback instead.
 
-  /** A usage limit is in force: no turn starts (queued jobs wait, then resume). */
+  /** An account-wide usage limit is in force: no turn starts (queued jobs wait, then resume). */
   private limited(now = Date.now()): boolean {
     return !!this.st.limit && now < this.st.limit.until;
+  }
+
+  /** A model family's own limit in force now, if any. */
+  private modelLimit(family: string | undefined, now = Date.now()): ModelLimit | undefined {
+    const l = family ? this.st.modelLimits?.[family] : undefined;
+    return l && now < l.until ? l : undefined;
+  }
+
+  /**
+   * The model family an agent's next turn runs ("fable", "opus"...): its model (the lead's fallback
+   * while it runs it), else, for a model that names none ("default"), what its turns reported.
+   * Undefined for a Codex agent: these are the Claude plan's limits.
+   */
+  private familyOf(agentId: string): string | undefined {
+    const engine = this.engineFor(agentId);
+    if (engine.id !== 'claude') return undefined;
+    const family = modelFamily(this.turnModel(agentId, agentId === LEAD ? 'lead' : 'worker', engine).model);
+    const reported = this.reportedModels.get(agentId);
+    return family ?? (reported?.engine === engine.id ? modelFamily(reported.label) : undefined);
+  }
+
+  /** The usage limit an agent waits for before its next turn: the account's, or its model family's own (`family`). */
+  private holdFor(agentId: string, now = Date.now()): { until: number; type?: string; family?: string } | undefined {
+    if (this.limited(now)) return this.st.limit;
+    const family = this.familyOf(agentId);
+    const l = this.modelLimit(family, now);
+    return l && family ? { until: l.until, ...(l.type ? { type: l.type } : {}), family } : undefined;
+  }
+
+  /** "usage limit - resumes 14:05", "Fable limit - resumes 14:05" */
+  private holdActivity(hold: { until: number; family?: string } | undefined): string {
+    return `${hold?.family ? `${capital(hold.family)} limit` : 'usage limit'} - resumes ${hold ? clock(hold.until) : 'later'}`;
+  }
+
+  /** The agents on shift. */
+  private onShift(): string[] {
+    return [LEAD, ...this.team].filter((id) => this.fm.agent(id)?.active && !this.isStopped(id));
+  }
+
+  /** The agents on shift whose next turn runs `family`: the ones its limit holds. */
+  private onFamily(family: string): string[] {
+    return this.onShift().filter((id) => this.familyOf(id) === family);
+  }
+
+  /** "Marlow", "Marlow and Kit", "Marlow, Kit and Wren" */
+  private names(ids: string[]): string {
+    const n = ids.map((id) => this.fm.nameOf(id));
+    return n.length > 1 ? `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}` : (n[0] ?? '');
   }
 
   /** Workers allowed at once: fewer while the plan reports a usage warning. */
@@ -608,10 +696,9 @@ export class TeamBackend implements Backend {
       if (before !== undefined || r.status !== 'allowed') this.usagePoller?.trigger();
     }
     if (r.status === 'rejected') {
-      // the lead's own model at its own limit, with a fallback configured: the lead switches models
-      // and nobody waits (the turn ends refused; runJob continues it on the fallback)
-      if (from && this.switchLeadToFallback(from, { ...(r.type ? { type: r.type } : {}), ...(r.resetsAt ? { resetsAt: r.resetsAt } : {}) })) return;
-      this.setLimit(r.resetsAt, r.type);
+      // a model's own limit holds that model's agents (a lead on it with a fallback switches models;
+      // the turn ends refused and runJob continues it on the fallback); any other holds everyone
+      this.limitReached(r, undefined, from, false);
     } else if (r.status === 'allowed_warning') {
       const until = r.resetsAt ?? Date.now() + THROTTLE_DEFAULT_MS;
       const prev = this.st.throttle;
@@ -643,12 +730,107 @@ export class TeamBackend implements Backend {
     this.armLimitTimer();
   }
 
+  /**
+   * A usage limit refused a turn: `report` as the engine reported it (live, or the turn's last one),
+   * `text` the turn's error. A model's own limit holds the agents on that model (a lead on it with a
+   * fallback switches models); anything else holds everyone. A typed report decides which limit it
+   * is, the message only when there is none. `ended`: the turn is over (a live report of it may have
+   * recorded this limit already).
+   */
+  private limitReached(report: RateLimitReport | undefined, text: string | undefined, from: TurnOrigin | undefined, ended: boolean): void {
+    const rejected = report?.status === 'rejected' ? report : undefined;
+    const family = rejected?.type ? limitModelFamily(rejected.type) : limitFamilyFromText(text ?? '');
+    // the model the refused turn ran: as it reported it, else as it was started
+    const ran = from ? (modelFamily(from.reported) ?? modelFamily(from.model)) : family;
+    if (family && ran === family) {
+      this.setModelLimit(family, { ...(rejected?.resetsAt ? { resetsAt: rejected.resetsAt } : {}), ...(rejected?.type ? { type: rejected.type } : {}) });
+      return;
+    }
+    if (ended && this.limited()) return; // its live report held everyone already
+    // a model's limit on a turn of another model (or of one that names none) says nothing about
+    // which agents it holds: it holds everyone, like an account-wide limit
+    if (family) this.fm.log.warn(`${capital(family)} limit reported on ${from?.agentId ?? 'a'} turn of ${from?.reported ?? from?.model ?? 'an unknown model'}: everyone waits for it`);
+    this.setLimit(report?.resetsAt, report?.type);
+  }
+
+  /**
+   * A model family's own limit is reached (a refused turn, or the usage poll shows its weekly window
+   * full): the agents on that family wait until it resets, a lead on it with a fallback switches to
+   * the fallback, everyone else keeps working. Without a reset time it lasts until the model's weekly
+   * window resets in the usage poll, else a wait from 5 minutes doubling to an hour.
+   */
+  private setModelLimit(family: string, limit: { resetsAt?: number; type?: string; fromUsage?: boolean }): void {
+    const now = Date.now();
+    const prev = this.modelLimit(family, now);
+    if (prev) {
+      // in force already: a real reset time replaces a guessed one, otherwise it only gets longer; a
+      // refused turn confirms a limit only the usage poll had seen (a later poll cannot lift it then)
+      const longer = limit.resetsAt !== undefined && (!!prev.guessed || limit.resetsAt > prev.until);
+      const confirmed = !!prev.fromUsage && !limit.fromUsage;
+      if (!longer && !confirmed) return;
+      if (confirmed) delete prev.fromUsage;
+      if (limit.type) prev.type = limit.type;
+      this.fm.store.markDirty();
+      if (!longer) return;
+      prev.until = limit.resetsAt!;
+      delete prev.guessed;
+      this.fm.log.info(`${capital(family)} limit lasts until ${new Date(prev.until).toISOString()}`);
+      this.syncLeadFallback(family);
+      this.showBanner();
+      this.armLimitTimer();
+      return;
+    }
+    const window = limit.resetsAt ? undefined : this.usageReset(family, now);
+    const wait = this.familyBackoffMs.get(family) ?? LIMIT_BACKOFF_MS;
+    const until = limit.resetsAt ?? window ?? now + wait;
+    const guessed = !limit.resetsAt && !window;
+    if (guessed) this.familyBackoffMs.set(family, Math.min(LIMIT_BACKOFF_MAX_MS, wait * 2));
+    this.st.modelLimits = { ...this.st.modelLimits, [family]: { until, ...(limit.type ? { type: limit.type } : {}), ...(guessed ? { guessed: true } : {}), ...(limit.fromUsage ? { fromUsage: true } : {}) } };
+    this.fm.store.markDirty();
+    // the lead first: on its fallback it is not one of the agents that wait
+    this.syncLeadFallback(family);
+    const held = this.onFamily(family);
+    const model = capital(family);
+    const what = `${model} limit reached${limit.fromUsage ? ` (weekly ${model} usage at 100%)` : typeText(limit.type)}`;
+    this.fm.log.warn(
+      `${what}: ${held.length ? `${held.join(', ')} wait` : `no agent on shift runs ${model}`} until ${new Date(until).toISOString()}` +
+        `${guessed ? ' (no reset time given)' : ''}; agents on other models keep working`,
+    );
+    if (held.length) {
+      const others = this.onShift().length > held.length;
+      this.fm.bus.feed('error', `${what}. ${this.names(held)} (on ${model}) start${held.length === 1 ? 's' : ''} no new turn until ${clock(until)}; ${others ? 'the others keep working' : 'interrupted work resumes then'}.`);
+      this.fm.notify('warn', `${model} limit reached: ${this.names(held)} ${held.length === 1 ? 'waits' : 'wait'} until ${clock(until)}`);
+    }
+    this.showBanner();
+    this.armLimitTimer();
+  }
+
+  /** A model's own limit is over (it reset, or the usage poll shows room): its agents resume, a lead on its fallback for it returns to its own model. */
+  private liftModelLimit(family: string, why: string): void {
+    if (!this.st.modelLimits?.[family]) return;
+    // a lead that ran its fallback for this limit did not wait (at the reset onFallback() is over
+    // already, so its next turn counts as this family's)
+    const f = this.st.leadFallback;
+    const leadSwitched = !!f && f.family === family && f.model === this.cfg.leadModel && !!this.fallbackConfig();
+    const held = this.onFamily(family).filter((id) => !(id === LEAD && leadSwitched));
+    delete this.st.modelLimits[family];
+    this.fm.store.markDirty();
+    this.fm.log.info(`${capital(family)} limit over (${why})${held.length ? `: ${held.join(', ')} resume` : ''}`);
+    if (held.length) this.fm.bus.feed('system', `${capital(family)} limit reset: ${this.names(held)} ${held.length === 1 ? 'resumes' : 'resume'}`);
+    if (this.st.leadFallback?.family === family) this.endLeadFallback();
+    this.showBanner();
+    for (const id of this.queues.keys()) this.pump(id);
+    this.tick();
+  }
+
   /** Wake up when the earliest limit/throttle/lead-fallback window ends. */
   private armLimitTimer(): void {
     if (this.limitTimer) clearTimeout(this.limitTimer);
     this.limitTimer = undefined;
     const now = Date.now();
-    const ends = [this.st.limit?.until, this.st.throttle?.until, this.st.leadFallback?.until].filter((t): t is number => typeof t === 'number' && t > now);
+    const ends = [this.st.limit?.until, ...Object.values(this.st.modelLimits ?? {}).map((l) => l.until), this.st.throttle?.until, this.st.leadFallback?.until].filter(
+      (t): t is number => typeof t === 'number' && t > now,
+    );
     if (!ends.length) {
       this.liftExpired();
       return;
@@ -669,9 +851,14 @@ export class TeamBackend implements Backend {
     if (this.st.limit && now >= this.st.limit.until) {
       delete this.st.limit;
       changed = true;
-      this.fm.setStatus({ message: this.teamLabel() });
+      this.showBanner(); // the team label, or who still waits for a model's own limit
       this.fm.bus.feed('system', 'Usage limit reset: the team picks up where it stopped');
       for (const id of this.queues.keys()) this.pump(id);
+    }
+    for (const [family, l] of Object.entries(this.st.modelLimits ?? {})) {
+      if (now < l.until) continue;
+      this.liftModelLimit(family, 'it reset');
+      changed = true;
     }
     if (this.st.throttle && now >= this.st.throttle.until) {
       delete this.st.throttle;
@@ -712,10 +899,28 @@ export class TeamBackend implements Backend {
     return `${modelLabel(fb.model) ?? fb.model} (${fb.effort ?? this.cfg.leadEffort})`;
   }
 
-  /** The banner line: the team label, unless the auth failed or a usage limit holds everyone (those messages stay). */
-  private showTeamLabel(): void {
+  /**
+   * The banner line: who waits for a model's own limit (and that the others keep working), else the
+   * team label. A failed auth's message and an account-wide limit's (it holds everyone) stay.
+   */
+  private showBanner(): void {
     if (this.authFailed || this.limited() || this.fm.status.auth !== 'ok') return;
-    this.fm.setStatus({ message: this.teamLabel() });
+    const now = Date.now();
+    const holds = Object.entries(this.st.modelLimits ?? {})
+      .filter(([, l]) => now < l.until)
+      .map(([family, l]) => ({ family, l, held: this.onFamily(family) }))
+      .filter((x) => x.held.length);
+    if (!holds.length) {
+      this.fm.setStatus({ message: this.teamLabel() });
+      return;
+    }
+    const waiting = new Set(holds.flatMap((x) => x.held));
+    const others = this.onShift().some((id) => !waiting.has(id));
+    const lines = holds.map(({ family, l, held }) => {
+      const one = held.length === 1;
+      return `${capital(family)} limit reached${typeText(l.type)}: ${this.names(held)} ${one ? 'waits' : 'wait'} until ${clock(l.until)}, then ${one ? 'resumes' : 'resume'}`;
+    });
+    this.fm.setStatus({ message: `${lines.join('; ')}${others ? '; the others keep working' : ''}` });
   }
 
   /** When the usage poller last saw a model family's weekly window ("weekly:fable") reset, if that is still ahead. */
@@ -725,50 +930,51 @@ export class TeamBackend implements Backend {
     return Number.isFinite(at) && at > now ? at : undefined;
   }
 
+  /** The family of the lead's own model: as configured, else as its own turns reported it (an alias such as "default"). */
+  private leadOwnFamily(): string | undefined {
+    return modelFamily(this.cfg.leadModel) ?? modelFamily(this.leadOwnReported);
+  }
+
   /**
-   * The lead's turn on its own model hit a usage limit. When that limit is the model's own (its
-   * weekly window, e.g. the Fable limit; not the account's 5-hour, weekly or credit limit) and
-   * claude.leadFallback names a model outside it, the lead switches to the fallback until the limit
-   * resets and nobody waits. True when the lead is on its fallback for this limit, also when an
-   * earlier report of it already switched it (the live report, then the end of the same turn).
+   * A limit of a model family's own is in force (modelLimits). When it is the lead's own model's
+   * (from the lead's turn, a worker's turn, the usage poll or the state saved before a restart) and
+   * claude.leadFallback names a model outside it, the lead runs the fallback for as long as the limit
+   * lasts instead of waiting; on its fallback already, the fallback follows the limit's reset time.
    */
-  private switchLeadToFallback(from: TurnOrigin, limit: { type?: string; resetsAt?: number; text?: string }): boolean {
+  private syncLeadFallback(family: string): void {
     const fb = this.fallbackConfig();
-    if (!fb || from.agentId !== LEAD || from.fallback) return false;
-    // a typed report decides; the message only when there is none
-    const family = limit.type ? limitModelFamily(limit.type) : limitFamilyFromText(limit.text ?? '');
-    // the lead's own model as configured, else as its turn reported it (an alias such as "default")
-    const own = modelFamily(this.cfg.leadModel) ?? modelFamily(from.reported);
-    if (!family || family !== own || modelFamily(fb.model) === family) return false;
-    const now = Date.now();
-    const prev = this.st.leadFallback;
-    if (prev && this.onFallback(now)) {
-      if (limit.resetsAt && limit.resetsAt > prev.until) {
-        prev.until = limit.resetsAt;
-        delete prev.guessed;
-        this.fm.store.markDirty();
-        this.armLimitTimer();
-      }
-      return true;
+    const l = this.modelLimit(family);
+    if (!fb || !l || family !== this.leadOwnFamily() || modelFamily(fb.model) === family) return;
+    const prev = this.onFallback() ? this.st.leadFallback : undefined;
+    if (prev) {
+      if (prev.until === l.until && !!prev.guessed === !!l.guessed) return;
+      prev.until = l.until;
+      if (l.guessed) prev.guessed = true;
+      else delete prev.guessed;
+      this.fm.store.markDirty();
+      this.fm.log.info(`${capital(family)} limit until ${new Date(l.until).toISOString()}: ${this.fm.nameOf(LEAD)} returns to ${prev.model} then`);
+      this.showBanner();
+      this.armLimitTimer();
+      return;
     }
-    const window = limit.resetsAt ? undefined : this.usageReset(family, now);
-    const until = limit.resetsAt ?? window ?? now + this.fallbackBackoffMs;
-    const guessed = !limit.resetsAt && !window;
-    if (guessed) this.fallbackBackoffMs = Math.min(LIMIT_BACKOFF_MAX_MS, this.fallbackBackoffMs * 2);
-    this.st.leadFallback = { until, model: this.cfg.leadModel, family, ...(limit.type ? { type: limit.type } : {}), ...(guessed ? { guessed: true } : {}) };
+    const until = l.until;
+    this.st.leadFallback = { until, model: this.cfg.leadModel, family, ...(l.type ? { type: l.type } : {}), ...(l.guessed ? { guessed: true } : {}) };
     this.fm.store.markDirty();
     const what = `${capital(family)} limit reached`;
     this.fm.log.warn(
       `${what}: ${this.fm.nameOf(LEAD)} switches from ${this.cfg.leadModel} to ${fb.model} (${fb.effort ?? this.cfg.leadEffort}) until ${new Date(until).toISOString()}` +
-        `${guessed ? ' (the limit gave no reset time; it tries its own model again then)' : ''}`,
+        `${l.guessed ? ' (the limit gave no reset time; it tries its own model again then)' : ''}`,
     );
     this.fm.bus.feed('system', `${this.fm.nameOf(LEAD)} switched to ${this.fallbackLabel(fb)}: ${what}, back at ${clock(until)}`, { agentId: LEAD });
-    // the nameplate shows the fallback now, then what its first turn reports
-    this.reportedModels.delete(LEAD);
-    this.showEngines();
-    this.showTeamLabel();
+    // the nameplate shows the fallback now, then what its first turn reports; a turn still running
+    // on the lead's own model keeps its nameplate until it ends (runJob shows the fallback then)
+    const turn = this.running.get(LEAD);
+    if (!turn || turn.fallback) {
+      this.reportedModels.delete(LEAD);
+      this.showEngines();
+    }
+    this.showBanner();
     this.armLimitTimer();
-    return true;
   }
 
   /** The lead's own model's limit has reset (or the config no longer asks for a fallback): its next turn runs it again. */
@@ -786,7 +992,7 @@ export class TeamBackend implements Backend {
       this.reportedModels.delete(LEAD);
       this.showEngines();
     }
-    this.showTeamLabel();
+    this.showBanner();
   }
 
   /** At start: a fallback persisted before a restart applies only if the config still asks for it, for the same lead model. */
@@ -807,39 +1013,90 @@ export class TeamBackend implements Backend {
     }
   }
 
-  /** A usage poll came in: a fallback whose limit gave no reset time takes the window's reset (e.g. weekly:fable). */
-  private refineFallbackReset(): void {
-    const f = this.st.leadFallback;
-    if (!f?.guessed || !this.onFallback()) return;
-    const at = this.usageReset(f.family);
-    if (!at) return;
-    f.until = at;
-    delete f.guessed;
+  /**
+   * At start (after startLeadFallback), the limits saved before the restart. A Foreman from before
+   * per-model holds saved a model's own limit (e.g. the Fable limit, seven_day_overage_included) as
+   * the account-wide `limit`, which held everyone: it becomes that model's limit. A lead fallback in
+   * force is its model's limit too. Limits that ended while the Foreman was down go. A lead whose own
+   * model is limited switches to its fallback now, before its first turn.
+   */
+  private loadLimits(): void {
+    const st = this.st;
+    const now = Date.now();
+    const old = st.limit;
+    const family = limitModelFamily(old?.type);
+    if (old && family) {
+      delete st.limit;
+      this.fm.store.markDirty();
+      if (now < old.until) {
+        const prev = st.modelLimits?.[family];
+        if (!prev || prev.until < old.until) st.modelLimits = { ...st.modelLimits, [family]: { until: old.until, type: old.type! } };
+        this.fm.log.warn(
+          `the usage limit saved before the restart (${old.type}, until ${new Date(old.until).toISOString()}) is the ${capital(family)} limit: ` +
+            `it holds only the agents on ${capital(family)} now, not the whole team`,
+        );
+      } else this.fm.log.info(`the usage limit saved before the restart (${old.type}) is over`);
+    }
+    const f = st.leadFallback;
+    if (f && now < f.until && !this.modelLimit(f.family, now)) {
+      st.modelLimits = { ...st.modelLimits, [f.family]: { until: f.until, ...(f.type ? { type: f.type } : {}), ...(f.guessed ? { guessed: true } : {}) } };
+      this.fm.store.markDirty();
+    }
+    if (!st.modelLimits) return;
+    for (const [fam, l] of Object.entries(st.modelLimits)) {
+      if (now >= l.until) delete st.modelLimits[fam];
+    }
+    if (!Object.keys(st.modelLimits).length) delete st.modelLimits;
     this.fm.store.markDirty();
-    this.fm.log.info(`${capital(f.family)} limit resets ${new Date(at).toISOString()} (usage): ${this.fm.nameOf(LEAD)} returns to ${f.model} then`);
-    this.showTeamLabel();
-    this.armLimitTimer();
+    for (const [fam, l] of Object.entries(st.modelLimits ?? {})) {
+      this.fm.log.info(`${capital(fam)} limit until ${new Date(l.until).toISOString()}: agents on ${capital(fam)} wait for it, the others work`);
+      this.syncLeadFallback(fam);
+    }
   }
 
   /**
-   * The lead's turn on its own model was refused by that model's own limit and the lead now runs its
-   * fallback: the same job continues right away on the fallback (its session resumed), instead of
-   * waiting for the reset (holdForLimit). False when that does not apply.
+   * A usage poll came in. A model's weekly window at 100% (and not marked inactive) is that model's
+   * limit before any turn is refused: its agents wait, a lead on it switches to its fallback. A limit
+   * only the poll had seen lifts when its window has room again. A limit that gave no reset time
+   * takes its window's reset.
    */
-  private continueOnFallback(job: Job, stats: TurnStats, from: TurnOrigin): boolean {
-    // a limit that holds everyone (another agent's, or the account's) wins: the job waits for it
-    if (from.agentId !== LEAD || from.fallback || this.limited()) return false;
-    const rejected = stats.rateLimit?.status === 'rejected' ? stats.rateLimit : undefined;
-    const switched =
-      this.onFallback() ||
-      this.switchLeadToFallback(from, {
-        ...(rejected?.type ? { type: rejected.type } : {}),
-        ...(rejected?.resetsAt ? { resetsAt: rejected.resetsAt } : {}),
-        text: [stats.resultText ?? '', ...stats.errors].join(' '),
-      });
+  private applyUsage(usage: Usage): void {
+    if (usage.error || usage.stale) return;
+    const now = Date.now();
+    for (const w of usage.windows) {
+      const family = usageWindowFamily(w.id);
+      if (!family) continue;
+      const at = w.resetsAt ? Date.parse(w.resetsAt) : Number.NaN;
+      const full = w.utilization !== null && w.utilization >= 100 && w.active !== false && Number.isFinite(at) && at > now;
+      if (full) this.setModelLimit(family, { resetsAt: at, fromUsage: true });
+      else if (this.modelLimit(family, now)?.fromUsage) this.liftModelLimit(family, `the usage poll shows ${w.id} at ${w.utilization ?? '?'}%`);
+    }
+    for (const [family, l] of Object.entries(this.st.modelLimits ?? {})) {
+      if (!l.guessed || now >= l.until) continue;
+      const at = this.usageReset(family, now);
+      if (!at) continue;
+      l.until = at;
+      delete l.guessed;
+      this.fm.store.markDirty();
+      this.fm.log.info(`${capital(family)} limit resets ${new Date(at).toISOString()} (usage)`);
+      this.syncLeadFallback(family);
+      this.showBanner();
+      this.armLimitTimer();
+    }
+  }
+
+  /**
+   * The lead's turn on its own model was refused by a usage limit and the lead now runs its fallback
+   * (limitReached switched it, or an earlier limit of its model did): the same job continues right
+   * away on the fallback (its session resumed), instead of waiting for the reset (holdForLimit).
+   * False when that does not apply.
+   */
+  private continueOnFallback(job: Job, from: TurnOrigin): boolean {
+    // a limit that holds the fallback too (the account's, or the fallback model's own) wins: the job waits for it
+    if (from.agentId !== LEAD || from.fallback || !this.onFallback() || this.holdFor(LEAD)) return false;
     const fb = this.fallbackConfig();
     const f = this.st.leadFallback;
-    if (!switched || !fb || !f) return false;
+    if (!fb || !f) return false;
     const model = modelLabel(fb.model) ?? fb.model;
     const next = this.continuation(
       job,
@@ -859,15 +1116,18 @@ export class TeamBackend implements Backend {
   }
 
   /**
-   * A turn ended because of the usage limit: keep its task where it is and run the same job again
-   * (resuming its session) once the limit resets, instead of marking the task failed/blocked.
+   * A turn ended because of a usage limit (limitReached recorded it: the account's, or the model's
+   * own this agent runs): keep its task where it is and run the same job again (resuming its session)
+   * once the limit resets, instead of marking the task failed/blocked.
    */
   private holdForLimit(job: Job, stats: TurnStats): void {
-    if (!this.limited()) this.setLimit(stats.rateLimit?.resetsAt, stats.rateLimit?.type);
+    // a refusal that no limit in force covers for this agent still waits, as before (never retried at once)
+    if (!this.holdFor(job.agentId)) this.setLimit(stats.rateLimit?.resetsAt, stats.rateLimit?.type);
     const next = this.continuation(job, 'A usage limit stopped your last turn; it has reset now. Re-check where you were (your worktree, the task board) and continue your current job.');
-    const until = this.st.limit?.until;
-    this.fm.setAgent(job.agentId, { state: 'blocked', activity: `usage limit - resumes ${until ? clock(until) : 'later'}` });
-    this.fm.agentLog(job.agentId, 'error', `usage limit: this ${job.kind} resumes when it resets${until ? ` (${clock(until)})` : ''}`);
+    const hold = this.holdFor(job.agentId);
+    const what = hold?.family ? `${capital(hold.family)} limit` : 'usage limit';
+    this.fm.setAgent(job.agentId, { state: 'blocked', activity: this.holdActivity(hold) });
+    this.fm.agentLog(job.agentId, 'error', `${what}: this ${job.kind} resumes when it resets${hold ? ` (${clock(hold.until)})` : ''}`);
     const q = this.queues.get(job.agentId) ?? [];
     q.unshift(next);
     this.queues.set(job.agentId, q);
@@ -951,6 +1211,8 @@ export class TeamBackend implements Backend {
     const a = this.fm.agent(w);
     if (!a || !a.active || a.paused || this.isStopped(w) || !this.team.includes(w)) return false;
     if (this.running.has(w) || (this.queues.get(w)?.length ?? 0) > 0) return false;
+    // its model is at a limit of its own: no new task for it (a worker on another model takes it)
+    if (this.holdFor(w)) return false;
     return !this.fm.tasks.list().some((t) => t.assignee === w && t.status === 'doing');
   }
 
@@ -1020,10 +1282,21 @@ export class TeamBackend implements Backend {
     q.push(job);
     this.queues.set(job.agentId, q);
     this.pump(job.agentId);
+    // the job waits for a usage limit (the account's, or its model's own): the agent says which
+    if (!this.running.has(job.agentId)) this.showHold(job.agentId);
+  }
+
+  /** An agent with a job that waits for a usage limit shows it ("Fable limit - resumes 14:05"). */
+  private showHold(agentId: string): void {
+    const a = this.fm.agent(agentId);
+    if (this.stopping || !a?.active || a.paused || this.isStopped(agentId)) return;
+    const hold = this.holdFor(agentId);
+    if (hold) this.fm.setAgent(agentId, { state: 'blocked', activity: this.holdActivity(hold) });
   }
 
   private pump(agentId: string): void {
-    if (this.stopping || this.authFailed || this.limited()) return;
+    // a usage limit holds the agent: the account's (everyone), or its model family's own
+    if (this.stopping || this.authFailed || this.holdFor(agentId)) return;
     if (this.running.has(agentId)) return;
     const a = this.fm.agent(agentId);
     if (!a || a.paused || !a.active || this.isStopped(agentId)) return;
@@ -1238,12 +1511,14 @@ export class TeamBackend implements Backend {
           },
           onModel: (m) => {
             reported = m;
+            // the lead's own model, when its name says nothing about its family ("default")
+            if (agentId === LEAD && !turnSel.override && engine.id === 'claude') this.leadOwnReported = m;
             const label = modelLabel(m);
             if (!label) return;
             this.reportedModels.set(agentId, { engine: engine.id, label });
             this.fm.setAgent(agentId, { engine: engine.id, model: label });
           },
-          onRateLimit: (r) => this.onRateLimit(r, { agentId, fallback: !!turnSel.override, ...(reported ? { reported } : {}) }),
+          onRateLimit: (r) => this.onRateLimit(r, { agentId, fallback: !!turnSel.override, model, ...(reported ? { reported } : {}) }),
         });
       } finally {
         clearTimeout(timer);
@@ -1275,8 +1550,9 @@ export class TeamBackend implements Backend {
     if (reason) void this.reap(entry);
     delete this.st.inflight[agentId];
     this.fm.store.markDirty();
-    // the lead's own model's limit reset while this fallback turn ran: its nameplate shows its own model again
-    if (sel?.override && !this.onFallback()) {
+    // the lead's own model's limit reset while this fallback turn ran (its nameplate shows its own
+    // model again), or began while this turn on its own model ran (the fallback, from now on)
+    if ((sel?.override && !this.onFallback()) || (agentId === LEAD && sel && !sel.override && this.onFallback())) {
       this.reportedModels.delete(agentId);
       this.showEngines();
     }
@@ -1293,16 +1569,21 @@ export class TeamBackend implements Backend {
       const a = this.fm.agent(agentId);
       if (a?.taskId === job.taskId) this.fm.setAgent(agentId, { state: 'idle', station: 'lounge', activity: 'task cancelled', taskId: null, worktree: null });
     } else if (stats?.isError && stats.limited) {
-      // the lead's own model at its own limit: on to its fallback now; anything else waits for the reset
-      const origin: TurnOrigin = { agentId, fallback: !!sel?.override, ...(reported ? { reported } : {}) };
-      if (!sel || !this.continueOnFallback(job, stats, origin)) this.holdForLimit(job, stats);
+      // a model's own limit holds the agents on that model (the lead, with a fallback, continues on it
+      // now); any other limit holds everyone until it resets
+      const origin: TurnOrigin = { agentId, fallback: !!sel?.override, ...(sel ? { model: sel.model } : {}), ...(reported ? { reported } : {}) };
+      this.limitReached(stats.rateLimit, [stats.resultText ?? '', ...stats.errors].join(' '), origin, true);
+      if (!sel || !this.continueOnFallback(job, origin)) this.holdForLimit(job, stats);
     } else if (reason === 'timeout') {
       this.fm.agentLog(agentId, 'error', `turn timed out after ${TURN_TIMEOUT_MS / 60_000} min`);
       await this.afterTurn(job, { isError: true, subtype: 'timeout', errors: ['turn timed out'] }).catch((e) => this.fm.log.error(`afterTurn ${agentId}: ${(e as Error).stack ?? e}`));
     } else {
-      if (stats && !stats.isError) this.limitBackoffMs = LIMIT_BACKOFF_MS;
-      // the lead's own model worked again: a later limit without a reset time starts from the shortest wait
-      if (stats && !stats.isError && agentId === LEAD && sel && !sel.override) this.fallbackBackoffMs = LIMIT_BACKOFF_MS;
+      if (stats && !stats.isError) {
+        this.limitBackoffMs = LIMIT_BACKOFF_MS;
+        // its model worked again: a later limit of it without a reset time starts from the shortest wait
+        const family = modelFamily(reported) ?? modelFamily(sel?.model);
+        if (family) this.familyBackoffMs.delete(family);
+      }
       await this.afterTurn(job, stats).catch((e) => this.fm.log.error(`afterTurn ${agentId}: ${(e as Error).stack ?? e}`));
     }
     // the turn used some of the plan: fresh numbers (unless the poller is backing off)
@@ -1676,6 +1957,8 @@ export class TeamBackend implements Backend {
       }
       this.fm.setAgent(agentId, { active: false, paused: false, state: 'idle', station: 'lounge', activity: 'stopped - off shift', taskId: null, worktree: null });
     }
+    // who waits for a model's own limit may have changed (an agent on that model went off / on shift)
+    if (Object.values(this.st.modelLimits ?? {}).some((l) => Date.now() < l.until)) this.showBanner();
     this.tick();
   }
 }

@@ -38,11 +38,23 @@ export function limitModelFamily(type: string | undefined): string | undefined {
 
 /**
  * The model family a limit message names, for a turn that ended without a typed report: "You've hit
- * your Fable limit · resets 3pm" -> "fable". The session, weekly and credit limits name none.
+ * your Fable limit · resets 3pm", "You've reached your Fable limit" -> "fable". The session, weekly
+ * and credit limits name none.
  */
 export function limitFamilyFromText(text: string): string | undefined {
-  const name = /\bhit your (\w+) limit\b/i.exec(text)?.[1]?.toLowerCase();
+  const name = /\b(?:hit|reached) your (\w+) limit\b/i.exec(text)?.[1]?.toLowerCase();
   return name && FAMILIES.has(name) ? name : undefined;
+}
+
+/**
+ * The model family whose own weekly window a usage window is (claude/usage.ts ids): "weekly:fable" ->
+ * "fable", "weekly:opus" -> "opus". Undefined for the account's windows ("session", "weekly"), a
+ * surface's ("weekly:claude-code") and one model version's ("weekly:opus-4-5"): a full window of
+ * those says nothing about which agents a model limit would hold.
+ */
+export function usageWindowFamily(id: string): string | undefined {
+  const m = /^weekly:([a-z]+)$/.exec(id);
+  return m && FAMILIES.has(m[1]!) ? m[1] : undefined;
 }
 
 /** "claude-fable-5-1", "fable", "opus[1m]" -> their family; undefined when none is named ("default", "opusplan"). */

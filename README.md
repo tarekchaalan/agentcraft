@@ -435,7 +435,8 @@ the workers resolved, took 2 to 10 minutes each and about $6 in total. The sim b
 With your Claude login, the agents share your plan's limits. The console, `/status`, the HUD and the
 feed monitor show how much of each window is used and when it resets. When a usage warning comes,
 only one worker runs at a time (`--throttle-concurrent`); at the limit, work pauses and resumes
-after the reset. A model's own weekly limit (such as the Fable limit) need not stop the lead: with
+after the reset. A model's own weekly limit (such as the Fable limit) pauses only the agents on that
+model, and need not stop the lead: with
 `"leadFallback": {"model": "claude-opus-5-5", "effort": "xhigh"}` under `claude` in
 `~/.agentcraft/config.json`, it continues on that model until the limit resets (see
 [foreman/README.md](foreman/README.md#lead-fallback-claudeleadfallback)).
