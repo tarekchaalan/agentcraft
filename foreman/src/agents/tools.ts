@@ -285,7 +285,7 @@ export function agentTools(fm: Foreman, agentId: string, role: 'lead' | 'worker'
           if (!t) return fail(`no task ${task_id}`);
           if (t.status !== 'review') return fail(`${t.id} is ${t.status}, not in review`);
           if (!t.worktree || !t.repoId) return fail(`${t.id} has no worktree to merge`);
-          const open = fm.decisions.open().find((d) => d.kind === 'merge' && d.taskId === t.id);
+          const open = fm.decisions.pending().find((d) => d.kind === 'merge' && d.taskId === t.id);
           if (open) return withInbox(`Merge decision ${open.id} for ${t.id} is already waiting for ${userName()}.`);
           if (await closeIfNoChanges(fm, t.id)) {
             hooks.onTasksChanged();
