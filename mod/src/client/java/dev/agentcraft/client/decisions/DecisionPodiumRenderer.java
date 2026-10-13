@@ -102,7 +102,7 @@ public class DecisionPodiumRenderer extends StationRenderer<DecisionPodiumBlockE
 			return;
 		}
 		s.agentId = d.agentId();
-		s.nameColor = UiBits.nameOnLight(d.agentId());
+		s.nameColor = UiBits.nameOnPaper(d.agentId());
 		Cache c = cache;
 		if (c == null || c.revision() != s.foremanRevision || !c.decisionId().equals(d.id()) || c.count() != s.count) {
 			Font font = Minecraft.getInstance().font;
@@ -173,15 +173,15 @@ public class DecisionPodiumRenderer extends StationRenderer<DecisionPodiumBlockE
 		WorldUi.submitSprite(poseStack, collector, WorldUi.Layer.OVERLAY, Kit.dot("waiting", true), tx - 2, ty - 2, 11, 11, (haloA << 24) | 0xFFFFFF,
 			light);
 		WorldUi.submitSprite(poseStack, collector, WorldUi.Layer.OVERLAY, Kit.dot("waiting", false), tx, ty, 7, 7, 0.15f, 0xFFFFFFFF, light);
-		WorldUi.submitText(poseStack, collector, s.header, tx + 11, ty, s.stale ? UiBits.muted() : UiStyle.CLAY_DARK, light);
+		WorldUi.submitText(poseStack, collector, s.header, tx + 11, ty, s.stale ? UiBits.mutedOnPaper() : UiStyle.CLAY_DARK, light);
 		String key = Keys.decisions == null ? "J" : Keys.label(Keys.decisions);
 		int kw = font.width(key);
 		float kx = x0 + w - 8 - kw - 8;
 		WorldUi.submitNineSlice(poseStack, collector, WorldUi.Layer.SOLID, Kit.KEYCAP, kx, ty - 2, kw + 8, 12, 0xFFFFFFFF, light);
-		WorldUi.submitText(poseStack, collector, key, kx + 4, ty, UiStyle.color("palette.ui.text", 0xFF34312E), light);
+		WorldUi.submitText(poseStack, collector, key, kx + 4, ty, UiStyle.base("palette.ui.text", 0xFF34312E), light);
 		ty += 10 + 3;
 		// divider
-		WorldUi.submitFill(poseStack, collector, tx, ty - 2, x0 + w - 8, ty - 1, UiStyle.color("palette.ui.edge", 0xFFC9BBA3), light);
+		WorldUi.submitFill(poseStack, collector, tx, ty - 2, x0 + w - 8, ty - 1, UiStyle.base("palette.ui.edge", 0xFFC9BBA3), light);
 		// agent face + name + kind
 		if (Cast.get(s.agentId) != null) {
 			Identifier tex = AgentCraft.id("textures/gui/portrait/" + s.agentId + ".png");
@@ -192,10 +192,10 @@ public class DecisionPodiumRenderer extends StationRenderer<DecisionPodiumBlockE
 		}
 		float nx = tx + 11;
 		WorldUi.submitText(poseStack, collector, s.nameSeq, nx, ty + 1, s.nameColor, light);
-		WorldUi.submitText(poseStack, collector, s.kindSeq, nx + s.nameWidth, ty + 1, UiBits.muted(), light);
+		WorldUi.submitText(poseStack, collector, s.kindSeq, nx + s.nameWidth, ty + 1, UiBits.mutedOnPaper(), light);
 		ty += 11;
 		for (FormattedCharSequence line : s.lines) {
-			WorldUi.submitText(poseStack, collector, line, tx, ty, UiBits.ink(), light);
+			WorldUi.submitText(poseStack, collector, line, tx, ty, UiBits.inkOnPaper(), light);
 			ty += 10;
 		}
 		poseStack.popPose();

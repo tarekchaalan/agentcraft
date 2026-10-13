@@ -41,7 +41,7 @@ public final class ConsoleCommands {
 	// ------------------------------------------------------------------ intents
 
 	public sealed interface Intent permits Goal, Message, Answer, RepoAdd, Repos, AgentAction, TaskAction, ShowDiff, Status, Help, Decide, Clear,
-		Sound, Invalid, Empty {
+		Sound, Theme, Invalid, Empty {
 	}
 
 	/** {@code repoId} null = the Foreman's default; {@code choices} non-empty = ask which repo first. */
@@ -85,6 +85,10 @@ public final class ConsoleCommands {
 	public record Sound(@Nullable Boolean on) implements Intent {
 	}
 
+	/** {@code dark} null: show the theme. */
+	public record Theme(@Nullable Boolean dark) implements Intent {
+	}
+
 	public record Invalid(String error) implements Intent {
 	}
 
@@ -107,6 +111,7 @@ public final class ConsoleCommands {
 		new Command("repo", "/repo add <path>", "work in a local folder (git or not)"),
 		new Command("repos", "/repos", "list repos"),
 		new Command("status", "/status", "goal, agents, tasks and decisions"),
+		new Command("theme", "/theme dark|light", "dark or light screens and HUD"),
 		new Command("sound", "/sound on|off", "decision bell and done chime"),
 		new Command("clear", "/clear", "clear the console's own lines"),
 		new Command("help", "/help", "this list"));
@@ -186,6 +191,11 @@ public final class ConsoleCommands {
 			case "decide", "decisions", "d" -> new Decide(args.isEmpty() ? null : args.get(0));
 			case "clear", "cls" -> new Clear();
 			case "sound", "sounds", "mute" -> parseSound(cmd, args);
+			case "theme" -> args.isEmpty() ? new Theme(null) : switch (args.get(0).toLowerCase(Locale.ROOT)) {
+				case "dark", "on" -> new Theme(true);
+				case "light", "off" -> new Theme(false);
+				default -> new Invalid("usage: /theme dark|light");
+			};
 			case "goal" -> rest.isEmpty() ? new Invalid("type the goal after /goal") : goal(rest, s);
 			default -> new Invalid("unknown command /" + cmd + " (/help lists them)");
 		};
@@ -479,6 +489,7 @@ public final class ConsoleCommands {
 	public static @Nullable String describe(Intent in, ForemanState s) {
 		return switch (in) {
 			case Goal g -> g.repoId() == null ? "new goal" : "new goal → " + repoName(g.repoId(), s);
+			case Theme th -> th.dark() == null ? "show the theme" : th.dark() ? "switch to the dark theme" : "switch to the light theme";
 			case Message m -> m.to().equals("all") ? "message everyone" : "message " + displayName(m.to(), s);
 			case Answer a -> "answer " + a.decision().id() + (a.option() != null ? ": " + a.option() : ": free text");
 			case RepoAdd r -> "add repo";

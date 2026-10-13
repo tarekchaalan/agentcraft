@@ -22,11 +22,17 @@ public final class Panels {
 	}
 
 	public static void sprite(GuiGraphicsExtractor g, Identifier sprite, int x, int y, int w, int h) {
-		g.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, x, y, w, h);
+		int tint = UiStyle.paperTint(sprite);
+		if (tint == -1) {
+			g.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, x, y, w, h);
+		} else {
+			g.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, x, y, w, h, tint);
+		}
 	}
 
 	public static void sprite(GuiGraphicsExtractor g, Identifier sprite, int x, int y, int w, int h, int argb) {
-		g.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, x, y, w, h, argb);
+		int tint = UiStyle.paperTint(sprite);
+		g.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, x, y, w, h, tint == -1 ? argb : UiStyle.multiply(argb, tint));
 	}
 
 	/** Matte paper window (soft shadow included in the sprite). */

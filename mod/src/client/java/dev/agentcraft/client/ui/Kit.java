@@ -68,6 +68,29 @@ public final class Kit {
 	private Kit() {
 	}
 
+	/** Paper sprites the dark theme tints (panels, insets, fields, plain buttons, task cards...). */
+	private static final java.util.Set<String> PAPER = java.util.Set.of("panel_paper", "panel_inset", "frame_brass", "header", "divider", "pill",
+		"keycap", "text_field", "text_field_focused", "tab_active", "tab_inactive", "scroll_track", "scroll_thumb", "scroll_thumb_hover",
+		"scroll_grip", "progress_track", "checkbox", "button", "button_hover", "button_pressed", "button_disabled");
+	/** ... of which the controls, tinted a little lighter than the panels they sit on. */
+	private static final java.util.Set<String> CONTROLS = java.util.Set.of("pill", "keycap", "text_field", "text_field_focused", "tab_active",
+		"scroll_thumb", "scroll_thumb_hover", "checkbox", "button", "button_hover", "button_pressed", "button_disabled");
+
+	private static @org.jspecify.annotations.Nullable String kitName(Identifier sprite) {
+		String p = sprite.getPath();
+		return sprite.getNamespace().equals(AgentCraft.MOD_ID) && p.startsWith("kit/") ? p.substring(4) : null;
+	}
+
+	public static boolean isPaper(Identifier sprite) {
+		String n = kitName(sprite);
+		return n != null && (PAPER.contains(n) || n.startsWith("card_"));
+	}
+
+	public static boolean isControl(Identifier sprite) {
+		String n = kitName(sprite);
+		return n != null && CONTROLS.contains(n);
+	}
+
 	public static Identifier id(String name) {
 		return AgentCraft.id("kit/" + name);
 	}

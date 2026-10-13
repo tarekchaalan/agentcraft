@@ -152,13 +152,13 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 		toFace(ps, s.facing, LINEN_DEPTH, b.ppb);
 		ps.translate(0, -(s.panelHeight - 1) * b.ppb, 0);
 		int light = s.light;
-		int headInk = UiStyle.color("paper.text", 0xFF1F1E1D);
-		int muted = UiStyle.color("paper.muted", 0xFF655E55);
+		int headInk = UiStyle.base("paper.text", 0xFF1F1E1D);
+		int muted = UiStyle.base("paper.muted", 0xFF655E55);
 		// the board's own walnut surface, evenly lit (the block face is shaded by its facing; the cards are not)
 		drawTiled(ps, c, b, SURFACE, light);
 		// ---- column rules + headers (one rect batch)
 		DisplayDraw.Rects r = b.lanes.clear();
-		int rule = UiStyle.color("board.rule", 0xFFC9A227);
+		int rule = UiStyle.base("board.rule", 0xFFC9A227);
 		for (int i = 0; i < b.columns.size(); i++) {
 			TaskBoard.Column col = b.columns.get(i);
 			if (i > 0) {
@@ -166,13 +166,13 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 				r.add(rx - 0.5f, b.iy0 + 2, rx + 0.5f, b.iy1 - 2, Z, rule, light);
 			}
 			// header strip: paper label with a status-coloured underline
-			r.add(col.ax, b.iy0 + 1, col.ax + col.aw, b.iy0 + TaskBoard.HEADER_H - 1, 2 * Z, UiStyle.color("board.label", 0xFFF4EFE6), light);
+			r.add(col.ax, b.iy0 + 1, col.ax + col.aw, b.iy0 + TaskBoard.HEADER_H - 1, 2 * Z, UiStyle.base("board.label", 0xFFF4EFE6), light);
 			r.add(col.ax, b.iy0 + TaskBoard.HEADER_H - 2, col.ax + col.aw, b.iy0 + TaskBoard.HEADER_H, 2.5f * Z, UiStyle.status(col.family), light);
 			if (col.chip != null) {
 				float cx = col.chipX();
-				r.add(cx, col.chipY, cx + col.chipW, col.chipY + TaskBoard.CHIP_H, 2 * Z, UiStyle.color("board.chip", 0xFFE9E1D3), light);
+				r.add(cx, col.chipY, cx + col.chipW, col.chipY + TaskBoard.CHIP_H, 2 * Z, UiStyle.base("board.chip", 0xFFE9E1D3), light);
 				r.add(cx, col.chipY + TaskBoard.CHIP_H - 1, cx + col.chipW, col.chipY + TaskBoard.CHIP_H, 2.5f * Z,
-					UiStyle.color("palette.ui.edge", 0xFFC9BBA3), light);
+					UiStyle.base("palette.ui.edge", 0xFFC9BBA3), light);
 			}
 		}
 		r.submit(ps, c);
@@ -184,7 +184,7 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 			if (col.blocked > 0 && col.blockedW > 0) {
 				// explicit "1 blocked" in the error colour, apart from the column's count
 				float bx = col.countX() - 8 - col.blockedW;
-				WorldUi.submitText(ps, c, col.blockedSeq, bx, b.iy0 + 3, UiStyle.color("paper.del_fg", 0xFF873C2A), light);
+				WorldUi.submitText(ps, c, col.blockedSeq, bx, b.iy0 + 3, UiStyle.base("paper.del_fg", 0xFF873C2A), light);
 			}
 			if (col.chip != null) {
 				WorldUi.submitText(ps, c, col.chip, col.chipX() + 5, col.chipY + 2, muted, light);
@@ -207,7 +207,7 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 		}
 		if (!FLYING.isEmpty()) {
 			DisplayDraw.Rects shadow = b.shadows.clear();
-			int sh = UiStyle.withAlpha(UiStyle.color("palette.ui.shadow", 0xFF1F1E1D), 46);
+			int sh = UiStyle.withAlpha(UiStyle.base("palette.ui.shadow", 0xFF1F1E1D), 46);
 			for (TaskBoard.Card card : FLYING) {
 				shadow.add(card.x + 2, card.y + 3, card.x + card.w + 2, card.y + card.h + 2, LIFT - Z, sh, light);
 			}
@@ -249,8 +249,8 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 		});
 		ps.pushPose();
 		ps.translate(0, 0, 3 * Z);
-		int ink = UiStyle.color("paper.text", 0xFF1F1E1D);
-		int muted = UiStyle.color("paper.muted", 0xFF655E55);
+		int ink = UiStyle.base("paper.text", 0xFF1F1E1D);
+		int muted = UiStyle.base("paper.muted", 0xFF655E55);
 		WorldUi.submitText(ps, c, l1, x + 9, y + 5, ink, light);
 		WorldUi.submitText(ps, c, pre, x + 9, ky + 1, muted, light);
 		if (kw > 0) {
@@ -265,19 +265,19 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 		Font font = Minecraft.getInstance().font;
 		DisplayDraw.Rects v = b.veil.clear();
 		float trim = b.ppb * TaskBoard.TRIM / 16f;
-		v.add(trim, trim, b.pw - trim, b.ph - trim, LIFT + 4 * Z, UiStyle.withAlpha(UiStyle.color("palette.colors.walnut", 0xFF3B2A20), 150), light);
+		v.add(trim, trim, b.pw - trim, b.ph - trim, LIFT + 4 * Z, UiStyle.withAlpha(UiStyle.base("palette.colors.walnut", 0xFF3B2A20), 150), light);
 		c.order(0).submitCustomGeometry(ps, DisplayDraw.fillTranslucent(), (pose, vc) -> v.emit(pose, vc, 255, -1));
 		int tw = font.width(label);
 		float w = tw + 20, h = 15;
 		float x = (b.pw - w) / 2f, y = (b.ph - h) / 2f;
 		DisplayDraw.Rects badge = b.badge.clear();
-		badge.add(x, y, x + w, y + h, LIFT + 5 * Z, UiStyle.color("board.label", 0xFFF4EFE6), light);
-		badge.add(x, y + h - 1, x + w, y + h, LIFT + 5.5f * Z, UiStyle.color("palette.ui.edge", 0xFFC9BBA3), light);
+		badge.add(x, y, x + w, y + h, LIFT + 5 * Z, UiStyle.base("board.label", 0xFFF4EFE6), light);
+		badge.add(x, y + h - 1, x + w, y + h, LIFT + 5.5f * Z, UiStyle.base("palette.ui.edge", 0xFFC9BBA3), light);
 		badge.submit(ps, c);
 		ps.pushPose();
 		ps.translate(0, 0, LIFT + 6 * Z);
 		WorldUi.submitSprite(ps, c, WorldUi.Layer.SOLID, DisplayDraw.dot(never ? "idle" : "error", false), x + 5, y + 4, 7, 7, 0f, 0xFFFFFFFF, light);
-		WorldUi.submitText(ps, c, label, x + 15, y + 4, UiStyle.color("paper.text", 0xFF1F1E1D), light);
+		WorldUi.submitText(ps, c, label, x + 15, y + 4, UiStyle.base("paper.text", 0xFF1F1E1D), light);
 		ps.popPose();
 	}
 
@@ -337,7 +337,7 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 				float k = (1 - t) * (1 - t);
 				int base = UiStyle.status(card.task.status() == TaskStatus.BLOCKED ? "error" : family(card.col));
 				// lifted towards cream so even Todo's grey reads against the walnut
-				int tint = DisplayDraw.mix(base, UiStyle.color("palette.colors.cream", 0xFFF4EFE6), 0.35f);
+				int tint = DisplayDraw.mix(base, UiStyle.base("palette.colors.cream", 0xFFF4EFE6), 0.35f);
 				int inner = UiStyle.withAlpha(tint, (int) (235 * k));
 				int outer = UiStyle.withAlpha(tint, (int) (110 * k));
 				DisplayDraw.Rects g = card.glow.clear();
@@ -355,7 +355,7 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 		c.order(0).submitCustomGeometry(ps, WorldUi.guiAtlasSolid(), (pose, vc) -> DisplayDraw.nineSlice(pose, vc, sprite, x, y, w,
 			h - 1, zc, 0xFFFFFFFF, light, 1));
 		DisplayDraw.Rects soft = card.shadow.clear();
-		int shadowInk = UiStyle.color("palette.ui.shadow", 0xFF1F1E1D);
+		int shadowInk = UiStyle.base("palette.ui.shadow", 0xFF1F1E1D);
 		soft.add(x + 1, y + h - 1, x + w, y + h, zc, UiStyle.withAlpha(shadowInk, 60), light);
 		soft.add(x + 2, y + h, x + w - 1, y + h + 1, zc, UiStyle.withAlpha(shadowInk, 24), light);
 		if (ct.needsYou && !hovered) {
@@ -367,7 +367,7 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 		}
 		if (hovered) {
 			// crosshair on the card: a brass outline says "right-click opens it"
-			ring(soft, x - 0.5f, y - 0.5f, w + 1, h + 1, 1, zc, UiStyle.color("palette.colors.brass", 0xFFC9A227), light);
+			ring(soft, x - 0.5f, y - 0.5f, w + 1, h + 1, 1, zc, UiStyle.base("palette.colors.brass", 0xFFC9A227), light);
 		}
 		c.order(0).submitCustomGeometry(ps, DisplayDraw.fillTranslucent(), (pose, vc) -> soft.emit(pose, vc, 255, -1));
 		Kit.Padding p = Kit.padding("card_todo");
@@ -399,7 +399,7 @@ public class TaskBoardRenderer extends StationRenderer<TaskBoardBlockEntity, Tas
 				}
 				WorldUi.submitText(ps, c, ct.lines.get(i), cx0, ly, ct.titleColor, light);
 			}
-			int reasonInk = UiStyle.color("paper.del_fg", 0xFF873C2A);
+			int reasonInk = UiStyle.base("paper.del_fg", 0xFF873C2A);
 			for (int i = 0; i < ct.reason.size(); i++, li++) {
 				float ly = ty + li * TaskBoard.LINE;
 				if (ly + 8 > fy - 2) {

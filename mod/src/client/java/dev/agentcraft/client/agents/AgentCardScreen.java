@@ -524,7 +524,7 @@ public final class AgentCardScreen extends ModScreen {
 					label = "Answer: " + label;
 				}
 				int labelColor = row.disabled ? UiStyle.color("paper.disabled")
-					: isArmed ? UiStyle.color("palette.ui.panel_hi", UiStyle.CREAM) : UiStyle.color("paper.text");
+					: isArmed ? UiStyle.base("palette.ui.panel_hi", UiStyle.CREAM) : UiStyle.color("paper.text");
 				Panels.text(g, font, TextUtil.ellipsize(font, label, row.w - kw - 12), row.x + kw + 7, row.y + 4, labelColor);
 				by += OPT_H + 1;
 			}
@@ -542,7 +542,7 @@ public final class AgentCardScreen extends ModScreen {
 			// itself; draw the label in the light panel colour instead
 			Panels.button(g, font, "", b.x, b.y, b.w, true, b.hit(mouseX, mouseY), false);
 			String l = TextUtil.ellipsize(font, b.label, b.w - 12);
-			Panels.text(g, font, l, b.x + (b.w - font.width(l)) / 2, b.y + 6, UiStyle.color("palette.ui.panel_hi", UiStyle.CREAM));
+			Panels.text(g, font, l, b.x + (b.w - font.width(l)) / 2, b.y + 6, UiStyle.base("palette.ui.panel_hi", UiStyle.CREAM));
 		} else {
 			Panels.button(g, font, b.label, b.x, b.y, b.w, b.primary, b.hit(mouseX, mouseY), b.disabled);
 		}

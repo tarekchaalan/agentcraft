@@ -55,11 +55,12 @@ public final class UiBits {
 	}
 
 	public static int cream() {
-		return UiStyle.color("palette.ui.panel", UiStyle.CREAM);
+		// light text on clay / ink surfaces: the same in both themes
+		return UiStyle.base("palette.ui.panel", UiStyle.CREAM);
 	}
 
 	public static int panelHi() {
-		return UiStyle.color("palette.ui.panel_hi", 0xFFFFFBF4);
+		return UiStyle.base("palette.ui.panel_hi", 0xFFFFFBF4);
 	}
 
 	public static int activityOnInk() {
@@ -68,7 +69,7 @@ public final class UiBits {
 
 	/** Error text on paper (darker than the status red, 5.6:1 on cream). */
 	public static int errorText() {
-		return UiStyle.color("monitor.error", 0xFF9A2F2B);
+		return UiStyle.dark() ? UiStyle.base("monitor_dark.error", 0xFFEA847B) : UiStyle.base("monitor.error", 0xFF9A2F2B);
 	}
 
 	/** Warning text on paper (a usage window past 80 %): the amber {@code paper.warn_fg}, clay-dark if the token is missing. */
@@ -87,9 +88,27 @@ public final class UiBits {
 			return ink();
 		}
 		if (isUser(agentId)) {
-			return UiStyle.CLAY_DARK;
+			// clay-dark is too dim on the dark theme's panels
+			return UiStyle.dark() ? UiStyle.CLAY : UiStyle.CLAY_DARK;
 		}
 		return UiStyle.agentOnLight(agentId);
+	}
+
+	/** {@link #nameOnLight} for a paper surface in the world, whatever the GUI theme. */
+	public static int nameOnPaper(@Nullable String agentId) {
+		if (agentId == null || agentId.isEmpty()) {
+			return inkOnPaper();
+		}
+		return isUser(agentId) ? UiStyle.CLAY_DARK : UiStyle.agentOnPaper(agentId);
+	}
+
+	/** Text on a paper surface in the world (podium bubble, terminal), whatever the GUI theme. */
+	public static int inkOnPaper() {
+		return UiStyle.base("paper.text", UiStyle.INK);
+	}
+
+	public static int mutedOnPaper() {
+		return UiStyle.base("paper.muted", 0xFF655E55);
 	}
 
 	public static int nameOnDark(@Nullable String agentId) {

@@ -500,6 +500,16 @@ never hide text behind it.
 Screens: paper panels, ink text, no shadows, no vanilla grey GUI (docs/visual-bar.md). Never
 hard-code colours; ask `UiStyle`. Sprites are 1 texel = 1 GUI px (GUI scale 3 at 1080p).
 
+Themes: light (the default) and dark (`/theme dark|light` in the console, saved in
+`<game dir>/agentcraft/theme.txt`; `AGENTCRAFT_THEME` overrides for a run). With the dark theme
+`UiStyle.color` answers `gui/ui-style-dark.json` for the tokens it lists (`paper.*`,
+`palette.ui.*`, `ink_ui.ghost_on_paper`), `Panels.sprite` tints the paper sprites of the kit
+(`Kit.isPaper`: panels, insets, fields, pills, plain buttons, cards; controls a shade lighter) and
+`UiStyle.agentOnLight` gives the on-dark name colours. What must not follow the theme asks
+`UiStyle.base` (light text on clay buttons and ink tooltips) or `UiStyle.agentOnPaper` /
+`UiBits.nameOnPaper` / `UiBits.inkOnPaper` (the in-world paper displays: monitors, task board,
+terminal, podium, merge station, bubbles keep their fixed looks). `dev.hud.state` reports `theme`.
+
 ## HUD (`client.hud`)
 
 `HudElementRegistry.addLast(AgentCraft.id("hud/<name>"), element)`. Phase 2 ships the connection

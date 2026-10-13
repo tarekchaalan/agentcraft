@@ -92,6 +92,7 @@ Delete `mod/run/saves/AgentCraft HQ` (or `AgentCraft Survival`) to start over wi
 | `AGENTCRAFT_DEV` | dev run: 1, jar: 0 | `0` disables the DevBridge, `1` enables it |
 | `AGENTCRAFT_MUTE` | dev run: 1, jar: 0 | `1` forces master and music volume to 0 at startup. **Set `0` for real use** (for example in launch.ps1) to keep your own volume |
 | `AGENTCRAFT_FOCUS` | dev run: 0, jar: 1 | `0`: the window is shown **without activating it**, so it never steals focus. `1`: normal "come to front" |
+| `AGENTCRAFT_THEME` | unset | `dark` or `light`: the screens' and HUD's theme for this run, overriding the saved `/theme` choice (`<game dir>/agentcraft/theme.txt`; light when neither says) |
 | `AGENTCRAFT_AUTOWORLD` | dev run: 1, jar: 0 | `1`: create/load the AgentCraft world on startup; `0`: stay on the title screen |
 | `AGENTCRAFT_WORLD` | `studio` | `studio` = the agents' creative meadow ("AgentCraft HQ"); `survival` = a normal world in survival mode ("AgentCraft Survival"), the HQ built into its terrain |
 | `AGENTCRAFT_WORLD_SEED` | studio: fixed; survival: random | seed of a world created on this start (number, or text hashed like the world-creation screen) |

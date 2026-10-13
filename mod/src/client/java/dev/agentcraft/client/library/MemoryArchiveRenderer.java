@@ -131,7 +131,7 @@ public class MemoryArchiveRenderer extends StationRenderer<MemoryArchiveBlockEnt
 		int x0 = 9;
 		int x1 = 87;
 		int y = LABEL_Y;
-		int ink = UiStyle.color("paper.text");
+		int ink = UiStyle.base("paper.text");
 		// labels are paper, not light: tint the bright kit pill down to cream
 		int paper = 0xFFF2ECE1;
 		if (s.plate) {

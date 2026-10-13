@@ -446,7 +446,7 @@ public class TaskScreen extends ModScreen {
 			// Panels.button colours a primary label with palette.ui.highlight, which is clay (= the button): draw it here in cream
 			Panels.sprite(g, Kit.button(true, hover ? "hover" : "normal"), x, y, w, 20);
 			String l = TextUtil.ellipsize(font, label, w - 12);
-			Panels.text(g, font, l, x + (w - font.width(l)) / 2, y + 6, UiStyle.color("palette.ui.panel_hi", 0xFFFFFBF4));
+			Panels.text(g, font, l, x + (w - font.width(l)) / 2, y + 6, UiStyle.base("palette.ui.panel_hi", 0xFFFFFBF4));
 			return;
 		}
 		Panels.button(g, font, label, x, y, w, primary, hover, !enabled);

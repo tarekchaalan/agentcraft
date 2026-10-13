@@ -190,7 +190,7 @@ public final class Nameplate {
 			// paused by you: a pause glyph instead of the dot (also on the compact pill)
 			poseStack.pushPose();
 			poseStack.translate(0f, 0f, 0.3f);
-			int bar = UiStyle.color("ink_ui.activity", 0xFFC4BDB2);
+			int bar = UiStyle.base("ink_ui.activity", 0xFFC4BDB2);
 			WorldUi.submitFill(poseStack, collector, cx + 0.5f, ty + 1, cx + 2.5f, ty + 1 + DOT, bar, light);
 			WorldUi.submitFill(poseStack, collector, cx + 4.5f, ty + 1, cx + 6.5f, ty + 1 + DOT, bar, light);
 			poseStack.popPose();
@@ -216,7 +216,7 @@ public final class Nameplate {
 			poseStack.popPose();
 		}
 		if (d.row2Width() > 0) {
-			int actColor = d.stale() ? UiStyle.color("ink_ui.ghost", 0xFF857D71) : UiStyle.color("ink_ui.activity", 0xFFC4BDB2);
+			int actColor = d.stale() ? UiStyle.base("ink_ui.ghost", 0xFF857D71) : UiStyle.base("ink_ui.activity", 0xFFC4BDB2);
 			WorldUi.submitText(poseStack, collector, d.activitySeq(), x0 + pad.left() + 1 + (d.innerWidth() - d.row2Width()) / 2f, ty + 10, actColor,
 				light);
 			if (d.row3Width() > 0) {

@@ -16,11 +16,12 @@ public record ScreenStyle(String id, boolean dark, int bgTop, int bgBottom, int 
 
 	/** Agent name colour on this screen. */
 	public int name(String agentId) {
-		return dark ? UiStyle.agentOnDark(agentId) : UiStyle.agentOnLight(agentId);
+		return dark ? UiStyle.agentOnDark(agentId) : UiStyle.agentOnPaper(agentId);
 	}
 
 	private static int c(String token, int fallback) {
-		return UiStyle.color(token, fallback);
+		// the in-world monitor looks are fixed: not affected by the GUI theme
+		return UiStyle.base(token, fallback);
 	}
 
 	private static ScreenStyle makePaper() {
@@ -30,7 +31,7 @@ public record ScreenStyle(String id, boolean dark, int bgTop, int bgBottom, int 
 			c("monitor.result", 0xFF485A48), c("monitor.error", 0xFF9A2F2B), c("monitor.path", 0xFF6A5132), c("monitor.diff_hunk", 0xFF195E5D),
 			c("monitor.diff_add", 0xFF445545), c("monitor.diff_add_bg", 0xFFD5D9C7), c("monitor.diff_del", 0xFF803A29),
 			c("monitor.diff_del_bg", 0xFFEDCEBA), c("monitor.diff_ctx", 0xFF655E55), c("monitor.text", 0xFF1F1E1D), c("paper.text", 0xFF1F1E1D),
-			c("palette.ui.panel", 0xFFF4EFE6), c("monitor.attention", 0xFF844331));
+			UiStyle.base("palette.ui.panel", 0xFFF4EFE6), c("monitor.attention", 0xFF844331));
 	}
 
 	private static ScreenStyle makeDark() {

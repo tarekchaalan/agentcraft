@@ -133,7 +133,7 @@ public final class SpeechBubble {
 			cut.add(TextUtil.ellipsize(font, rest.toString(), MAX_TEXT));
 			plain = cut;
 		}
-		int ink = UiStyle.color("paper.text", UiStyle.INK);
+		int ink = UiStyle.base("paper.text", UiStyle.INK);
 		int toColor = toColor(l.to());
 		List<FormattedCharSequence> lines = new ArrayList<>(plain.size());
 		int[] widths = new int[plain.size()];
@@ -172,9 +172,9 @@ public final class SpeechBubble {
 
 	private static int toColor(@Nullable String to) {
 		if (to == null || to.equals("user") || to.equals("all")) {
-			return UiStyle.color("paper.link", UiStyle.CLAY_DARK);
+			return UiStyle.base("paper.link", UiStyle.CLAY_DARK);
 		}
-		return Cast.get(to) != null ? UiStyle.agentOnLight(to) : UiStyle.color("paper.link", UiStyle.CLAY_DARK);
+		return Cast.get(to) != null ? UiStyle.agentOnPaper(to) : UiStyle.base("paper.link", UiStyle.CLAY_DARK);
 	}
 
 	/** Total stacked height above the plate (body + tail + gap), px. */
@@ -206,7 +206,7 @@ public final class SpeechBubble {
 		WorldUi.submitNineSlice(ps, c, layer, Kit.BUBBLE, x0, y0, l.width(), l.height(), tint, light);
 		WorldUi.submitSprite(ps, c, layer, Kit.BUBBLE_TAIL, -4.5f, y1 - 1, 9, TAIL_H, solid ? 0f : 0.05f, tint, light);
 		float ty = y0 + pad.top();
-		int ink = UiStyle.withAlpha(UiStyle.color("paper.text", UiStyle.INK), alpha);
+		int ink = UiStyle.withAlpha(UiStyle.base("paper.text", UiStyle.INK), alpha);
 		int inner = l.width() - pad.left() - pad.right();
 		for (int i = 0; i < l.lines().size(); i++) {
 			float tx = x0 + pad.left() + (inner - l.lineWidths()[i]) / 2f;
