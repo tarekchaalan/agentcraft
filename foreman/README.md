@@ -105,8 +105,9 @@ most ~100 ms of state, and interrupted agent turns resume on the next start.
 
 ### Agent context (`claude.context`)
 
-Agents run with Claude Code's own settings off (`settingSources: []`): settings-file allow rules and
-repo hooks would run ahead of, or outside, the permission policy. What they do get is set here:
+Claude agents run with Claude Code's own settings off (`settingSources: []`): settings-file allow
+rules and repo hooks would run ahead of, or outside, the permission policy. What they do get is set
+here (the Claude engine adds it; Codex agents in a mixed team are not affected):
 
 ```json
 { "claude": { "context": {
