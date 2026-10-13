@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Foreman CLI for scripts and QA: connects like the mod does (hello -> snapshot), prints JSON.
 //
-//   node tools/foremancli.mjs status [--wait-showcase SECONDS]   backend/auth + agents/tasks/decisions summary
-//   node tools/foremancli.mjs wait [--timeout SECONDS]           wait until the Foreman answers
-//   node tools/foremancli.mjs diff <repoId> <worktree>           structured diff stats (diff.request)
-//   node tools/foremancli.mjs diff --decision d3                 the diff of a merge decision
-//   node tools/foremancli.mjs repo-add <path>                    register a project folder (repo.add)
-//   node tools/foremancli.mjs send <type> '<json payload>'       any client message; prints the ack
-//   node tools/foremancli.mjs send user.message to=kit "text=hello there"   (same, key=value form)
+//   node tools/foreman-cli.mjs status [--wait-showcase SECONDS]   backend/auth + agents/tasks/decisions summary
+//   node tools/foreman-cli.mjs wait [--timeout SECONDS]           wait until the Foreman answers
+//   node tools/foreman-cli.mjs diff <repoId> <worktree>           structured diff stats (diff.request)
+//   node tools/foreman-cli.mjs diff --decision d3                 the diff of a merge decision
+//   node tools/foreman-cli.mjs repo-add <path>                    register a project folder (repo.add)
+//   node tools/foreman-cli.mjs send <type> '<json payload>'       any client message; prints the ack
+//   node tools/foreman-cli.mjs send user.message to=kit "text=hello there"   (same, key=value form)
 //
 // Options: --port N (default AGENTCRAFT_PORT or 7878), --timeout SECONDS (connect, default 15),
 // --full (diff: print every file/hunk instead of a summary). Exit 0 when ok, 1 on error.
@@ -27,7 +27,7 @@ for (let i = 0; i < argv.length; i++) {
 }
 const cmd = pos.shift();
 if (!cmd || flags.help) {
-  console.error('usage: node tools/foremancli.mjs status|wait|diff|send [args] [--port N] [--timeout S] [--wait-showcase S] [--json]');
+  console.error('usage: node tools/foreman-cli.mjs status|wait|diff|send [args] [--port N] [--timeout S] [--wait-showcase S] [--json]');
   process.exit(cmd ? 0 : 2);
 }
 const port = flags.port ? Number(flags.port) : DEFAULT_FOREMAN_PORT;
@@ -40,7 +40,7 @@ try {
     port,
     timeoutMs: connectMs,
     client: 'cli',
-    onWait: (ms) => process.stderr.write(`[foremancli] waiting for the Foreman on :${port} (${Math.round(ms / 1000)}s)...\n`),
+    onWait: (ms) => process.stderr.write(`[foreman-cli] waiting for the Foreman on :${port} (${Math.round(ms / 1000)}s)...\n`),
   });
 } catch (e) {
   out({ ok: false, error: e.message });

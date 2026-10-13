@@ -1,4 +1,4 @@
-// Scene runner shared by shoot.mjs and qa.mjs: drives the DevBridge (and optionally the Foreman)
+// Scene runner shared by capture-screenshots.mjs and run-screenshot-qa.mjs: drives the DevBridge (and optionally the Foreman)
 // through a list of shots. Scene format: docs/QA.md ("Scene format").
 //
 //   import { loadScene, runScene } from './lib/scene.mjs';

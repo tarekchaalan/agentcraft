@@ -122,7 +122,7 @@ function Wait-ProcExit([int]$ProcessId, [string]$Start, [double]$TimeoutSec) {
 }
 
 # Force-kill a process we started and everything it started. Returns the pids it killed.
-# -KeepGradleDaemons (tools/mp.mjs, for an unfinished build) leaves a Gradle daemon that the tree
+# -KeepGradleDaemons (tools/multiplayer-harness.mjs, for an unfinished build) leaves a Gradle daemon that the tree
 # started, and whatever that daemon started, running: a daemon outlives its build and is shared.
 function Stop-OwnTree([int]$ProcessId, [string]$Start, [switch]$KeepGradleDaemons) {
     $killed = @()
@@ -186,7 +186,7 @@ function Send-CtrlBreak([int]$ProcessId) {
 # Start a long-running process in the background through tools/lib/bgrun.mjs.
 # Not Start-Process -RedirectStandardOutput: that creates the child with handle inheritance on, so
 # the Foreman/game would inherit OUR stdout/stderr, and a caller reading launch.ps1 through a pipe
-# (qa.mjs, an IDE terminal, `| Tee-Object`) would hang until the game exits (measured: 20 s child
+# (run-screenshot-qa.mjs, an IDE terminal, `| Tee-Object`) would hang until the game exits (measured: 20 s child
 # -> 20 s hang; clearing the inherit flag on our std handles did not help). Start-Process without
 # redirection uses ShellExecute (nothing inherited) and gives the wrapper its own hidden console;
 # the wrapper opens the logs and runs the command in that console (Ctrl+Break target for stop.ps1).

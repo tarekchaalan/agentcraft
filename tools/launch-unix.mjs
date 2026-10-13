@@ -21,15 +21,15 @@ const runFile = (kind, profile) => path.join(runDir, `unix-${kind}-${profile}.js
 
 function usage(code = 0) {
   console.log(`AgentCraft launcher (macOS, Linux)
-  node tools/unix.mjs launch [--backend sim|claude|codex] [--repo PATH] [--use-claude-login]
+  node tools/launch-unix.mjs launch [--backend sim|claude|codex] [--repo PATH] [--use-claude-login]
                             [--world studio|survival] [--seed SEED]
                             [--home PATH] [--profile NAME] [--port N] [--dev-port N]
                             [--dev] [--showcase busy|late] [--reset]
                             [--no-game] [--no-foreman] [--no-wait]
                             [--summary-json PATH]
                             [--foreman-arg VALUE] (repeatable)
-  node tools/unix.mjs stop [--game] [--foreman] [--profile NAME] [--stop-daemon]
-  node tools/unix.mjs login    sign the agents' Claude Code in (needed once for --use-claude-login)
+  node tools/launch-unix.mjs stop [--game] [--foreman] [--profile NAME] [--stop-daemon]
+  node tools/launch-unix.mjs login    sign the agents' Claude Code in (needed once for --use-claude-login)
 
 Default: Claude backend, ~/.agentcraft, ports 7878/7879, the studio world. --dev mutes
 the game, keeps it from taking focus, and disables desktop notifications.
@@ -164,7 +164,7 @@ function login() {
 }
 
 function foremanAuthFailed(port) {
-  try { return JSON.parse(runCli('foremancli.mjs', ['status', '--json', '--port', String(port)])).foreman?.auth === 'failed'; }
+  try { return JSON.parse(runCli('foreman-cli.mjs', ['status', '--json', '--port', String(port)])).foreman?.auth === 'failed'; }
   catch { return false; }
 }
 
@@ -204,7 +204,7 @@ function prepareAudio(dev) {
 }
 
 async function launch(opt, summary) {
-  if (!(process.platform in JDK_CANDIDATES)) throw new Error('tools/unix.mjs is for macOS and Linux; use tools/launch.ps1 on Windows');
+  if (!(process.platform in JDK_CANDIDATES)) throw new Error('tools/launch-unix.mjs is for macOS and Linux; use tools/launch.ps1 on Windows');
   if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('Node 22+ is required');
   fs.mkdirSync(runDir, { recursive: true });
   fs.mkdirSync(logDir, { recursive: true });
@@ -214,7 +214,7 @@ async function launch(opt, summary) {
   }
   installDeps(tools);
   if (opt.backend === 'claude' && opt['use-claude-login'] && !opt['no-foreman'] && !claudeLoggedIn()) {
-    throw new Error('the agents\' Claude Code is not signed in (the Claude desktop app login is separate). Run: node tools/unix.mjs login');
+    throw new Error('the agents\' Claude Code is not signed in (the Claude desktop app login is separate). Run: node tools/launch-unix.mjs login');
   }
   const fmFile = runFile('foreman', opt.profile);
   let fm = readJson(fmFile);
@@ -231,7 +231,7 @@ async function launch(opt, summary) {
       summary.foreman.port = fmPort;
       console.log(`Reusing Foreman ${fm.pid} on :${fmPort}`);
       if (fm.backend !== opt.backend) console.warn(`Foreman is already using backend ${fm.backend}`);
-      for (const repo of opt.repo) console.log(runCli('foremancli.mjs', ['repo-add', repo, '--port', String(fmPort)]));
+      for (const repo of opt.repo) console.log(runCli('foreman-cli.mjs', ['repo-add', repo, '--port', String(fmPort)]));
     } else {
       if (await portOpen(fmPort)) throw new Error(`port ${fmPort} is already in use`);
       installDeps(path.join(root, 'foreman'));
@@ -289,9 +289,9 @@ async function launch(opt, summary) {
   if (opt['no-wait']) return;
   await waitPort(game.devPort, 600000, game, 'Minecraft');
   console.log('Waiting for the studio world...');
-  const state = JSON.parse(runCli('devcli.mjs', ['wait', '--port', String(game.devPort), '--timeout', '300'], 310000));
+  const state = JSON.parse(runCli('devbridge-cli.mjs', ['wait', '--port', String(game.devPort), '--timeout', '300'], 310000));
   console.log(`Studio ready: Minecraft ${state.minecraft}, world ${state.world?.name ?? 'unknown'}, Foreman ${state.foreman?.link ?? 'unknown'}`);
-  console.log(`Ready. Stop with: node tools/unix.mjs stop --profile ${opt.profile}`);
+  console.log(`Ready. Stop with: node tools/launch-unix.mjs stop --profile ${opt.profile}`);
 }
 
 async function stop(opt) {
@@ -301,7 +301,7 @@ async function stop(opt) {
     const info = readJson(file);
     if (!owned(info)) { console.log(`${kind}: no launcher-owned process running`); continue; }
     if (kind === 'game' && await portOpen(info.devPort)) {
-      try { console.log(runCli('devcli.mjs', ['quit', '--port', String(info.devPort), '--timeout', '20'])); }
+      try { console.log(runCli('devbridge-cli.mjs', ['quit', '--port', String(info.devPort), '--timeout', '20'])); }
       catch (error) { console.warn(error.message); }
     } else if (kind === 'foreman') {
       process.kill(info.pid, 'SIGTERM');

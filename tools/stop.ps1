@@ -62,7 +62,7 @@ if ($doGame) {
     if (-not $g) {
         Write-Kv 'game' 'nothing to stop (no run file from launch.ps1)' 'DarkGray'
         $stray = Find-GameJvm $L
-        if ($stray) { Write-Warn2 "a game of this checkout is running but was not started by launch.ps1: $(Get-ProcLabel $stray.ProcessId) (left alone; node tools\devcli.mjs quit)" }
+        if ($stray) { Write-Warn2 "a game of this checkout is running but was not started by launch.ps1: $(Get-ProcLabel $stray.ProcessId) (left alone; node tools\devbridge-cli.mjs quit)" }
     } else {
         $t = Get-Date
         # the tree root launch.ps1 started: the bgrun wrapper (-> cmd -> gradlew java)
@@ -97,10 +97,10 @@ if ($doGame) {
                 }
                 if ($owner -eq $gamePid -and $node) {
                     $hung = $false
-                    try { $hung = [bool]((& $node.Source (Join-Path $L.Tools 'devcli.mjs') ping --port ([int]$g.devPort) --timeout 5 2>$null | Out-String | ConvertFrom-Json).stalled) } catch {}
+                    try { $hung = [bool]((& $node.Source (Join-Path $L.Tools 'devbridge-cli.mjs') ping --port ([int]$g.devPort) --timeout 5 2>$null | Out-String | ConvertFrom-Json).stalled) } catch {}
                     if ($hung) { Write-Warn2 'the game is hung (render thread stalled): dev.quit saves the world and force-exits it after 15 s' }
                     Write-Kv 'game' "dev.quit via DevBridge :$($g.devPort) (pid $gamePid; saves the world) ..."
-                    $q = (& $node.Source (Join-Path $L.Tools 'devcli.mjs') quit --port ([int]$g.devPort) --timeout 10 2>$null) | Out-String
+                    $q = (& $node.Source (Join-Path $L.Tools 'devbridge-cli.mjs') quit --port ([int]$g.devPort) --timeout 10 2>$null) | Out-String
                     if (Wait-ProcExit $gamePid $gameStart ([Math]::Max($TimeoutSec, 25))) {
                         $how = 'graceful'
                         if ($hung) { $how = 'dev.quit watchdog, world saved' }

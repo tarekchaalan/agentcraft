@@ -1,5 +1,5 @@
 {
-  "description": "In-world displays (desk monitors + Task Wall + task detail screen) on the showcase state. Cameras come from the HQ builder's anchors (dev.anchors). The desk close-ups nudge cam_desk_<id> with world offsets tuned for the test room (desks facing south) so the agent and its nameplate do not hide the monitor; with the real HQ, re-tune the offsets (or give the shots their own anchors). The oblique and hover shots use raw test-room cameras. Run: node tools/shoot.mjs tools/scenes/displays.json --port <devPort> --foreman <foremanPort> --prefix displays/",
+  "description": "In-world displays (desk monitors + Task Wall + task detail screen) on the showcase state. Cameras come from the HQ builder's anchors (dev.anchors). The desk close-ups nudge cam_desk_<id> with world offsets tuned for the test room (desks facing south) so the agent and its nameplate do not hide the monitor; with the real HQ, re-tune the offsets (or give the shots their own anchors). The oblique and hover shots use raw test-room cameras. Run: node tools/capture-screenshots.mjs tools/scenes/displays.json --port <devPort> --foreman <foremanPort> --prefix displays/",
   "foreman": {
     "connect": true
   },

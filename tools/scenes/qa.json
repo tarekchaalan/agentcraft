@@ -1,5 +1,5 @@
 {
-  "description": "AgentCraft QA camera set (docs/visual-bar.md, 'QA camera set'). Run with node tools/qa.mjs (showcase busy state). Cameras come from the mod's dev.anchors (cam_* names, contract in docs/QA.md); 'camera' is only a fallback for shots whose subject does not depend on the HQ layout. A shot with neither is skipped with a reason.",
+  "description": "AgentCraft QA camera set (docs/visual-bar.md, 'QA camera set'). Run with node tools/run-screenshot-qa.mjs (showcase busy state). Cameras come from the mod's dev.anchors (cam_* names, contract in docs/QA.md); 'camera' is only a fallback for shots whose subject does not depend on the HQ layout. A shot with neither is skipped with a reason.",
   "foreman": { "connect": true },
   "defaults": { "time": 12000, "weather": "clear", "hideHud": true, "mode": "spectator", "fov": 70 },
   "waitFor": [

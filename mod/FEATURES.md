@@ -473,8 +473,8 @@ except the submit nodes themselves.
   `dev.agents.fx {agent, fx: confetti|puff|sparkle|say, text?, to?}` (preview an effect),
   `dev.state.agents.exclaims` / `plateOverlapPairs`, with `AGENTCRAFT_DEV_TEST=1` also
   `dev.agents.keys {keys}` (queues SDL key events for the game window: Minecraft's real keyboard
-  path, text only while SDL text input is on, unlike `dev.type`; `tools/agents-typing.mjs` uses it), `tools/scenes/agents.json` (busy showcase) and
-  `tools/scenes/agents-late.json` (late showcase) in the test room, `tools/agents-live.mjs` (live sim
+  path, text only while SDL text input is on, unlike `dev.type`; `tools/check-agent-card-typing.mjs` uses it), `tools/scenes/agents.json` (busy showcase) and
+  `tools/scenes/agents-late.json` (late showcase) in the test room, `tools/watch-agent-life.mjs` (live sim
   observer: shots + per-agent log, optional auto-answer).
 
 ## UI kit (`client.ui`)
@@ -609,7 +609,7 @@ hidden.
 - Shots: `tools/scenes/displays.json` (test room: wall, monitors incl. an oblique view, task
   screens incl. the cancel confirmation, crosshair hover, night) and `tools/scenes/displays_bay.json`
   (builds a bay far from any HQ, around x=1000 z=1000, with the HQ's sizes: a 7x4 east-facing wall
-  and three 3x2 monitors, framed like the HQ cameras; its setup clears that box), `node tools/shoot.mjs <scene> --port <dev> --foreman <port>`.
+  and three 3x2 monitors, framed like the HQ cameras; its setup clears that box), `node tools/capture-screenshots.mjs <scene> --port <dev> --foreman <port>`.
 
 Drawing helpers shared by both (`client.monitor.DisplayDraw`): opaque flat rects/gradients in one
 custom-geometry node per screen (a 4x4 white `DynamicTexture` on a no-blend copy of the world text

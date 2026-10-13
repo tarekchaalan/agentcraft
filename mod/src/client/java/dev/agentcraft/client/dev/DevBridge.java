@@ -37,8 +37,8 @@ import org.java_websocket.handshake.ServerHandshakeBuilder;
 import org.java_websocket.server.WebSocketServer;
 
 /**
- * DevBridge: a localhost-only WebSocket server inside the client, used by tools/devcli.mjs,
- * tools/shoot.mjs and QA to drive the game (camera, screenshots, commands, screens...).
+ * DevBridge: a localhost-only WebSocket server inside the client, used by tools/devbridge-cli.mjs,
+ * tools/capture-screenshots.mjs and QA to drive the game (camera, screenshots, commands, screens...).
  *
  * <p>Protocol: one JSON object per text frame. Request {@code {"id":"1","type":"dev.state",...}};
  * response {@code {"id":"1","type":"dev.state","ok":true,...}} or

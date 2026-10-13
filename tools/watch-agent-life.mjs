@@ -3,7 +3,7 @@
 // the mod, then shoot one camera every N ms and log each agent's posture/family/bubble/particles plus
 // fps, moving agents and plate overlaps (artifacts/logs/<prefix>live.jsonl).
 //
-//   node tools/agents-live.mjs --port 7902 --seconds 60 --prefix agents_live/ [--goal "Add #tags"] \
+//   node tools/watch-agent-life.mjs --port 7902 --seconds 60 --prefix agents_live/ [--goal "Add #tags"] \
 //        [--camera cam_room | --camera x,y,z,lx,ly,lz] [--every 2500] [--foreman 32878 --answer-after 8]
 // --answer-after S: answer every decision with its first option once it has been open S seconds
 // (keeps the live sim moving; waiting states stay visible for a while first).

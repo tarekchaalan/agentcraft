@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 // DevBridge CLI. Talks to the running game (mod DevBridge, ws://127.0.0.1:${AGENTCRAFT_DEV_PORT:-7879}).
 //
-//   node tools/devcli.mjs wait                      wait for bridge + world (default 300s)
-//   node tools/devcli.mjs state
-//   node tools/devcli.mjs camera x y z yaw pitch [fov] [--mode creative|spectator|keep] [--feet]
-//   node tools/devcli.mjs camera x y z [fov] --look tx,ty,tz      aim the eye at a point
-//   node tools/devcli.mjs shot name [--hud] [--frames n] [--no-wait-chunks]
-//   node tools/devcli.mjs cmd "/time set 6000"
-//   node tools/devcli.mjs time 11000 | weather clear|rain|thunder | hud on|off
-//   node tools/devcli.mjs screen pause|chat|inventory|options|title|<registered>|null
-//   node tools/devcli.mjs key escape | type "hello" | waitchunks [timeoutMs] | ping | help
-//   node tools/devcli.mjs release                   hand the view back (FOV pin off, HUD on, creative)
-//   node tools/devcli.mjs raw '{"type":"dev.state"}'
-//   node tools/devcli.mjs quit                      save + quit; waits for the game to close the bridge
+//   node tools/devbridge-cli.mjs wait                      wait for bridge + world (default 300s)
+//   node tools/devbridge-cli.mjs state
+//   node tools/devbridge-cli.mjs camera x y z yaw pitch [fov] [--mode creative|spectator|keep] [--feet]
+//   node tools/devbridge-cli.mjs camera x y z [fov] --look tx,ty,tz      aim the eye at a point
+//   node tools/devbridge-cli.mjs shot name [--hud] [--frames n] [--no-wait-chunks]
+//   node tools/devbridge-cli.mjs cmd "/time set 6000"
+//   node tools/devbridge-cli.mjs time 11000 | weather clear|rain|thunder | hud on|off
+//   node tools/devbridge-cli.mjs screen pause|chat|inventory|options|title|<registered>|null
+//   node tools/devbridge-cli.mjs key escape | type "hello" | waitchunks [timeoutMs] | ping | help
+//   node tools/devbridge-cli.mjs release                   hand the view back (FOV pin off, HUD on, creative)
+//   node tools/devbridge-cli.mjs raw '{"type":"dev.state"}'
+//   node tools/devbridge-cli.mjs quit                      save + quit; waits for the game to close the bridge
 //
 // Options: --port N, --timeout SECONDS (bridge connect timeout; default 30, `wait` default 300).
 // Prints the JSON response; exit code 0 when ok, 1 on error.
@@ -20,7 +20,7 @@
 import { DevClient, DEFAULT_PORT } from './lib/devclient.mjs';
 
 function usage(code = 2) {
-  console.error(`usage: node tools/devcli.mjs <command> [args]
+  console.error(`usage: node tools/devbridge-cli.mjs <command> [args]
   wait [--bridge-only]          wait for the bridge (and the world unless --bridge-only)
   state | ping | help          ping also reports stalled/msSinceLastFrame (works when the game is hung)
   camera x y z yaw pitch [fov] [--mode spectator|creative|keep] [--feet] [--show-hud]
@@ -69,7 +69,7 @@ const num = (v, name) => {
 
 const isWait = cmd === 'wait';
 const connectTimeoutMs = (flags.timeout ? Number(flags.timeout) : isWait ? 300 : 30) * 1000;
-const log = (m) => process.stderr.write(`[devcli] ${m}\n`);
+const log = (m) => process.stderr.write(`[devbridge-cli] ${m}\n`);
 
 let dev;
 try {

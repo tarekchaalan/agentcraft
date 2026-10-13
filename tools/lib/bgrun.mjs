@@ -5,7 +5,7 @@
 //
 // Why it exists: PowerShell's Start-Process with -RedirectStandardOutput creates the child with
 // handle inheritance on, so a long-running Foreman/game would also inherit launch.ps1's own
-// stdout/stderr. When those are a pipe (qa.mjs, an IDE terminal, `| Tee-Object`) the caller then
+// stdout/stderr. When those are a pipe (run-screenshot-qa.mjs, an IDE terminal, `| Tee-Object`) the caller then
 // hangs until the game exits. launch.ps1 instead starts this script with ShellExecute (no handle
 // inheritance, own hidden console) and this script opens the log files and runs the real
 // command in the same hidden console. stop.ps1 sends Ctrl+Break to that console: the child

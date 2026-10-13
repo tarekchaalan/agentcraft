@@ -3,7 +3,7 @@
 // artifacts/shots/ (or AGENTCRAFT_SHOTS_DIR). The game must be running (tools\launch.ps1 or
 // gradlew runClient). Scene format: docs/QA.md ("Scene format"); runner: tools/lib/scene.mjs.
 //
-//   node tools/shoot.mjs tools/scenes/qa.json [--only a,b] [--port N] [--manifest out.json]
+//   node tools/capture-screenshots.mjs tools/scenes/qa.json [--only a,b] [--port N] [--manifest out.json]
 //        [--prefix qa/run1/] [--foreman [PORT]] [--anchors anchors.json] [--release] [--strict] [--verbose]
 //
 //   --prefix P      shot names are prefixed (names may contain '/', e.g. qa/<runId>/)
@@ -42,12 +42,12 @@ for (let i = 0; i < argv.length; i++) {
 }
 const flag = (f) => argv.includes(f);
 if (!sceneFile) {
-  console.error('usage: node tools/shoot.mjs <scene.json> [--only a,b] [--port N] [--manifest out.json] [--prefix p/] [--foreman [N]] [--anchors f.json] [--release] [--strict]');
+  console.error('usage: node tools/capture-screenshots.mjs <scene.json> [--only a,b] [--port N] [--manifest out.json] [--prefix p/] [--foreman [N]] [--anchors f.json] [--release] [--strict]');
   process.exit(2);
 }
 
 const scene = loadScene(sceneFile);
-const log = (m) => process.stderr.write(`[shoot] ${m}\n`);
+const log = (m) => process.stderr.write(`[capture-screenshots] ${m}\n`);
 if (foremanPort === null && scene.foreman?.connect) foremanPort = scene.foreman.port ?? DEFAULT_FOREMAN_PORT;
 
 let dev;

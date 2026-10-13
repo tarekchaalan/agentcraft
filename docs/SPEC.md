@@ -89,7 +89,7 @@ served **by the mod client**:
 - `dev.ping` → {stalled, msSinceLastFrame} (answers even when the game is hung) · `dev.release` (hand the view back: FOV pin off, HUD on, creative)
 - `dev.camera` replies ok only once a rendered frame matches the request; each call pins the exact FOV (default: the player's option), nothing carries over. `dev.quit` force-exits a hung game (world saved, exit code 3).
 - Full reference: mod/DEV.md. Request fields `id`, `type`, `timeoutMs` are reserved. Fields are strictly typed (finite numbers, ranges); errors name the field.
-- `tools/shoot.mjs <scene.json>` drives a list of shots and writes PNGs to `artifacts/shots/`.
+- `tools/capture-screenshots.mjs <scene.json>` drives a list of shots and writes PNGs to `artifacts/shots/`.
 
 ## Practicality requirements (non-negotiable)
 
@@ -141,7 +141,7 @@ skins, nameplates showing name + state, speech bubbles, pathfinding between stat
 mod/          Fabric mod (Gradle 9.7, Java 25, Loom 1.18; MC 26.3, see mod/DEV.md for why)
 foreman/      Node/TS orchestrator (npm, vitest)
 assets-src/   procedural texture/model/skin generators (Python+PIL / Node), Blender scripts
-tools/        launch.ps1, shoot.mjs, scenes/*.json, smoke tests
+tools/        launch.ps1, capture-screenshots.mjs, scenes/*.json, smoke tests
 sandbox/      throwaway git repos for end-to-end tests (never the user's real repos in tests)
 artifacts/    screenshots, logs (gitignored)
 docs/         SPEC.md, visual-bar.md, protocol.md, QA.md, img/

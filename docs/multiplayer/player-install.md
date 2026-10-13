@@ -61,7 +61,7 @@ Then start the Foreman **before** you join. Start only the Foreman; you join the
 with your normal Minecraft launcher.
 
 - **Windows (PowerShell):** `tools\launch.ps1 -NoGame -Repo <path to your repository>`
-- **macOS:** `node tools/mac.mjs launch --no-game --repo <path to your repository>`
+- **macOS:** `node tools/launch-unix.mjs launch --no-game --repo <path to your repository>`
 - **Linux:** from `foreman/`, `npm run start -- --backend claude --repo <path to your repository>`
 
 The Claude backend needs an Anthropic API key (`ANTHROPIC_API_KEY`), or your local `claude` CLI

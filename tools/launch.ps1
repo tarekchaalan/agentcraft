@@ -231,7 +231,7 @@ if ($live -and $Backend -eq 'claude' -and -not $NoForeman -and -not $DryRun) {
     $own0 = Read-JsonFile $fmRunFile
     $ours0 = $own0 -and ([int]$own0.pid -eq [int]$live.pid) -and (Test-SameProc ([int]$own0.pid) $own0.startTime)
     if ($ours0) {
-        $stJson0 = (& $node.Source (Join-Path $L.Tools 'foremancli.mjs') status '--port' ([string]$live.port) '--timeout' '20' 2>$null) | Out-String
+        $stJson0 = (& $node.Source (Join-Path $L.Tools 'foreman-cli.mjs') status '--port' ([string]$live.port) '--timeout' '20' 2>$null) | Out-String
         $st0 = $null
         try { $st0 = $stJson0 | ConvertFrom-Json } catch {}
         if ($st0 -and $st0.ok -and $st0.foreman.auth -eq 'failed') {
@@ -256,7 +256,7 @@ if ($live) {
     if ($Reset -or $showcaseOn -or $repoPaths.Count) {
         if ($Reset) { Write-Warn2 '-Reset ignored for a running Foreman (tools\stop.ps1 -Foreman first)' }
         foreach ($rp in $repoPaths) {
-            $r = & $node.Source (Join-Path $L.Tools 'foremancli.mjs') repo-add $rp --port $fmPort 2>$null | Out-String
+            $r = & $node.Source (Join-Path $L.Tools 'foreman-cli.mjs') repo-add $rp --port $fmPort 2>$null | Out-String
             if ($LASTEXITCODE -eq 0) { Write-Kv 'repo' "added $rp" } else { Write-Warn2 "repo.add $rp failed: $r" }
         }
     }
@@ -332,7 +332,7 @@ Save-Summary
 
 # backend/auth banner (and, for a showcase, wait until the scripted state is held)
 if (-not ($DryRun -and -not $fmInfo.reused) -and (-not $NoForeman -or (Test-PortOpen $fmPort))) {
-    $statusArgs = @((Join-Path $L.Tools 'foremancli.mjs'), 'status', '--port', [string]$fmPort, '--timeout', '20')
+    $statusArgs = @((Join-Path $L.Tools 'foreman-cli.mjs'), 'status', '--port', [string]$fmPort, '--timeout', '20')
     if ($showcaseOn) { $statusArgs += @('--wait-showcase', '240') }
     $stJson = (& $node.Source @statusArgs 2>$null) | Out-String
     $st = $null
@@ -382,7 +382,7 @@ if ($prev) {
 if (-not $liveGame) {
     # a game of this checkout started some other way (plain gradlew runClient) still owns mod/run
     $stray = Find-GameJvm $L
-    if ($stray) { Fail "a Minecraft client of this checkout is already running ($(Get-ProcLabel $stray.ProcessId)) but was not started by launch.ps1. Quit it first (node tools/devcli.mjs quit)." }
+    if ($stray) { Fail "a Minecraft client of this checkout is already running ($(Get-ProcLabel $stray.ProcessId)) but was not started by launch.ps1. Quit it first (node tools/devbridge-cli.mjs quit)." }
 }
 
 if ($liveGame) {
@@ -450,7 +450,7 @@ Save-Summary
 if ($NoWait -and $gameInfo.started) {
     $summary.ok = $true
     Save-Summary
-    Write-Kv 'note' "-NoWait: not waiting for the world (node tools\devcli.mjs wait --port $DevPort)" 'DarkGray'
+    Write-Kv 'note' "-NoWait: not waiting for the world (node tools\devbridge-cli.mjs wait --port $DevPort)" 'DarkGray'
     exit 0
 }
 
@@ -478,7 +478,7 @@ while ((Get-Date) -lt $deadline) {
     }
     if (Test-PortOpen $DevPort) {
         $remaining = [int][Math]::Max(10, ($deadline - (Get-Date)).TotalSeconds)
-        $wj = (& $node.Source (Join-Path $L.Tools 'devcli.mjs') wait --port $DevPort --timeout $remaining 2>$null) | Out-String
+        $wj = (& $node.Source (Join-Path $L.Tools 'devbridge-cli.mjs') wait --port $DevPort --timeout $remaining 2>$null) | Out-String
         $ws = $null
         try { $ws = $wj | ConvertFrom-Json } catch {}
         if ($ws -and $ws.ok) {
@@ -515,5 +515,5 @@ Write-Host 'Running.' -ForegroundColor Green
 Write-Host "  stop all      tools\stop.ps1            (game: quits + saves; Foreman: Ctrl+Break, state saved)" -ForegroundColor DarkGray
 Write-Host "  stop game     tools\stop.ps1 -Game      (or just close the window; agents keep working)" -ForegroundColor DarkGray
 Write-Host "  terminal UI   cd foreman; npm run tui -- --port $fmPort" -ForegroundColor DarkGray
-Write-Host "  dev bridge    node tools\devcli.mjs state --port $DevPort" -ForegroundColor DarkGray
+Write-Host "  dev bridge    node tools\devbridge-cli.mjs state --port $DevPort" -ForegroundColor DarkGray
 exit 0

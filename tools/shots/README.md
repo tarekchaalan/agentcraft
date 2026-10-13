@@ -1,17 +1,17 @@
 # Camera shots for screen recording
 
-`tools/record.mjs` plays these shots **in real time** in a running game (mod command `dev.play`)
+`tools/play-camera-shots.mjs` plays these shots **in real time** in a running game (mod command `dev.play`)
 so a screen recorder (OBS window capture at 60 fps) can film them: the camera follows a smooth
 path every rendered frame and a timeline injects Foreman events (agents walking, cards moving,
 speech bubbles), opens screens and types text. Internals: mod/DEV.md "Shot playback".
 
 ```powershell
 # game running, e.g. tools\launch.ps1 -Dev -Showcase busy -Home C:\Projects\agentcraft\.agentcraft-home -Port 51878 -DevPort 7951 -Profile rec
-node tools/devcli.mjs --port 7951 cmd "agentcraft hq"                       # once per world: build the HQ
-node tools/record.mjs tools/shots/hq_orbit.json --port 7951 --window 2560x1440 --hold 3000
+node tools/devbridge-cli.mjs --port 7951 cmd "agentcraft hq"                       # once per world: build the HQ
+node tools/play-camera-shots.mjs tools/shots/hq_orbit.json --port 7951 --window 2560x1440 --hold 3000
 #   setup -> camera on the first pose -> holds that frame 3 s (start OBS now) -> plays -> prints a JSON summary
-node tools/record.mjs tools/shots/*.json --port 7951                         # several shots in a row
-node tools/record.mjs tools/shots/desk_story.json --port 7951 --stills 1,2.5,4   # check a take: PNG stills during playback
+node tools/play-camera-shots.mjs tools/shots/*.json --port 7951                         # several shots in a row
+node tools/play-camera-shots.mjs tools/shots/desk_story.json --port 7951 --stills 1,2.5,4   # check a take: PNG stills during playback
 ```
 
 | option | |
@@ -35,7 +35,7 @@ requested camera). Exit code 1 if a shot failed.
 {
   "name": "desk_story",                 // letters, digits, _ -; default: the file name
   "duration": 5,                        // seconds (required)
-  "setup": {                            // done by record.mjs before playing (not filmed)
+  "setup": {                            // done by play-camera-shots.mjs before playing (not filmed)
     "foreman": { "minAgents": 6, "requireShowcase": true },   // wait until the Foreman link is synced (and in a showcase)
     "time": 12600,                      // dev.time (6000 noon, 12000-12800 golden hour, 18000 night)
     "weather": "clear",                 // dev.weather

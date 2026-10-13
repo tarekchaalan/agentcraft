@@ -1,5 +1,5 @@
 {
-  "description": "Self-test of the scene runner (tools/lib/scene.mjs) against any running game + showcase Foreman: scene anchor fallback table, raw camera + offset, a vanilla screen with typing, Foreman diff/ack messages through templates, a template that cannot resolve (skip), dev requests and per-shot waits. node tools/shoot.mjs tools/scenes/qa-selftest.json --foreman <port> --port <devPort> --prefix selftest/",
+  "description": "Self-test of the scene runner (tools/lib/scene.mjs) against any running game + showcase Foreman: scene anchor fallback table, raw camera + offset, a vanilla screen with typing, Foreman diff/ack messages through templates, a template that cannot resolve (skip), dev requests and per-shot waits. node tools/capture-screenshots.mjs tools/scenes/qa-selftest.json --foreman <port> --port <devPort> --prefix selftest/",
   "foreman": { "connect": true },
   "defaults": { "time": 6000, "weather": "clear", "mode": "spectator" },
   "anchors": {

@@ -74,7 +74,7 @@ import org.jspecify.annotations.Nullable;
  *       {@code <home>/<profile>/launcher.json}.</li>
  * </ol>
  * The Foreman keeps running after the game exits (agents keep working) unless {@code launcher.stopOnExit} is set, and
- * then only when this launcher started it. tools/launch.ps1 and tools/unix.mjs start their own Foreman before the game,
+ * then only when this launcher started it. tools/launch.ps1 and tools/launch-unix.mjs start their own Foreman before the game,
  * so the launcher finds it and reuses it; with {@code -NoForeman} / {@code --no-foreman} they turn the launcher off.
  */
 public final class Launcher {
@@ -537,7 +537,7 @@ public final class Launcher {
 
 	/**
 	 * Another live Foreman of this checkout (so on its foreman/node_modules), described, or null: launch.ps1's and
-	 * unix.mjs's run files in the checkout, and the run files of every profile in the home that name this checkout.
+	 * launch-unix.mjs's run files in the checkout, and the run files of every profile in the home that name this checkout.
 	 */
 	private static @Nullable String othersOnCheckout(Path root, String home) {
 		Path run = root.resolve("artifacts").resolve("run");
@@ -547,7 +547,7 @@ public final class Launcher {
 			boolean unix = name.startsWith("unix-foreman-") && name.endsWith(".json");
 			long p = num(LauncherProcs.readJson(f), "pid");
 			if ((ps || unix) && LauncherProcs.alive(p)) {
-				return "the Foreman pid " + p + " (" + (ps ? "tools\\launch.ps1" : "tools/unix.mjs") + ")";
+				return "the Foreman pid " + p + " (" + (ps ? "tools\\launch.ps1" : "tools/launch-unix.mjs") + ")";
 			}
 		}
 		for (Path dir : list(Path.of(home))) {
@@ -701,7 +701,9 @@ public final class Launcher {
 	 * The Foreman on our port: the run file (profile's, home's, any profile's) whose port is ours and whose pid is alive;
 	 * its checkout and commit from the run file (Foremen write them since this launcher). Who started it: our record,
 	 * else the launch scripts' run files in the checkout ({@code artifacts/run/foreman-<profile>-*.json} for
-	 * tools/launch.ps1, {@code artifacts/run/unix-foreman-<profile>.json} for tools/unix.mjs). Fills the running* fields.
+	 * tools/launch.ps1, {@code artifacts/run/unix-foreman-<profile>.json} for tools/launch-unix.mjs; that name predates the
+	 * script's rename from tools/unix.mjs and is kept, so a Foreman the old script started is still recognised). Fills
+	 * the running* fields.
 	 * Null when none.
 	 */
 	private static @Nullable Running readIdentity(@Nullable Path root) {
@@ -744,7 +746,7 @@ public final class Launcher {
 				&& !name.endsWith(".status.json");
 			boolean unix = name.equals("unix-foreman-" + PROFILE + ".json");
 			if ((ps || unix) && num(LauncherProcs.readJson(f), "pid") == p) {
-				return ps ? "tools\\launch.ps1" : "tools/unix.mjs";
+				return ps ? "tools\\launch.ps1" : "tools/launch-unix.mjs";
 			}
 		}
 		return null;

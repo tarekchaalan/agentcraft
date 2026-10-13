@@ -4,13 +4,13 @@
 
 Requires Node 22+, git, and Java 25. On macOS install Java with `brew install openjdk@25`; on
 Linux install your distribution's Java 25 JDK (Arch: `pacman -S jdk25-openjdk`) or set
-`JAVA_HOME` to one. `unix.mjs` uses that JDK directly, so no system Java changes are needed.
+`JAVA_HOME` to one. `launch-unix.mjs` uses that JDK directly, so no system Java changes are needed.
 
 ```sh
-node tools/unix.mjs launch --backend sim            # free simulated team
-node tools/unix.mjs stop --profile sim
-node tools/unix.mjs launch --repo /path/to/repo --use-claude-login
-node tools/unix.mjs stop                           # save/quit game, stop Foreman
+node tools/launch-unix.mjs launch --backend sim            # free simulated team
+node tools/launch-unix.mjs stop --profile sim
+node tools/launch-unix.mjs launch --repo /path/to/repo --use-claude-login
+node tools/launch-unix.mjs stop                           # save/quit game, stop Foreman
 ```
 
 The launcher installs npm dependencies on first use, runs the Fabric development client,
@@ -20,9 +20,9 @@ one component; `--no-wait` to return immediately while Minecraft builds. Repeat
 `--foreman-arg VALUE` to pass extra Foreman options. Logs and process records live in
 `artifacts/logs/unix-*.log` and `artifacts/run/unix-*.json`. `stop` only signals processes
 recorded by this launcher. Agent decisions show a desktop notification (Notification Center on
-macOS, `notify-send` on Linux). The screenshot QA command, `node tools/qa.mjs`, also uses this
+macOS, `notify-send` on Linux). The screenshot QA command, `node tools/run-screenshot-qa.mjs`, also uses this
 launcher on macOS and Linux. The mod's own Foreman launcher (mod/DEV.md "Foreman launcher") finds
-the Foreman `unix.mjs` started and leaves it alone; with `--no-foreman` the game gets
+the Foreman `launch-unix.mjs` started and leaves it alone; with `--no-foreman` the game gets
 `AGENTCRAFT_LAUNCHER=0` (export `AGENTCRAFT_LAUNCHER=1` first to let the game start its own).
 
 ### Your own launcher instance (Prism, MultiMC, ...)
@@ -43,11 +43,11 @@ built from, or the one `launcher.foremanDir` in `~/.agentcraft/config.json` name
 `npm ci` in `foreman/` on first use; the HUD pill and the console's `/foreman` say what it is doing.
 The backend and profile come from `AGENTCRAFT_BACKEND` / `AGENTCRAFT_PROFILE` (default `claude`).
 The Foreman keeps running after the game exits; set `launcher.stopOnExit` to stop it with the game.
-To run the Foreman yourself instead (`node tools/unix.mjs launch --no-game --backend sim`, or
+To run the Foreman yourself instead (`node tools/launch-unix.mjs launch --no-game --backend sim`, or
 `tools\launch.ps1 -NoGame` on Windows), start it before the game: the mod finds it and leaves it alone.
 `AGENTCRAFT_LAUNCHER=0` turns the mod's launcher off.
 
-`node tools/devcli.mjs state` reports the running game either way while the DevBridge is on.
+`node tools/devbridge-cli.mjs state` reports the running game either way while the DevBridge is on.
 
 ## Windows
 
@@ -156,7 +156,7 @@ this checkout's Gradle daemon (never another checkout's).
 
 ## Multiplayer harness
 
-`mp.mjs` prepares Loom's development launch configuration once, then starts a dedicated
+`multiplayer-harness.mjs` prepares Loom's development launch configuration once, then starts a dedicated
 server, one local Foreman per player, and one or two clients. Requires Node 22.18+, Java 25,
 and `npm ci --prefix tools` / `npm ci --prefix foreman`. Uses portable macOS, Linux and Windows
 launch paths. Windows process control uses the existing PowerShell helpers and background
@@ -164,18 +164,18 @@ runner. Two full `up` / `down` cycles with two clients were run on Windows (2026
 `docs/multiplayer/worknotes/MP-H.md`); the Windows paths that run did not reach are marked below.
 
 ```sh
-node tools/mp.mjs up --slot 92 --clients 2 --backend sim --json
-node tools/mp.mjs status --slot 92 --json
-node tools/mp.mjs down --slot 92 --json
+node tools/multiplayer-harness.mjs up --slot 92 --clients 2 --backend sim --json
+node tools/multiplayer-harness.mjs status --slot 92 --json
+node tools/multiplayer-harness.mjs down --slot 92 --json
 ```
 
-On the swarm machine, launch through `game node tools/mp.mjs up --slot 92 ...`.
+On the swarm machine, launch through `game node tools/multiplayer-harness.mjs up --slot 92 ...`.
 Use `--gradle-command gw-raw` under `game` so preparation uses the swarm environment and
 does not try to reacquire the Gradle lock already held by `game`. Keep the slot held for
 the entire live check (including `down`), for example with a shell script run by `game`.
 For separate preparation, run `gw -I ../tools/lib/mp/export-launch.gradle mpExportLaunch
 -PmpLaunchFile=../artifacts/run/mp-92/launch.json --no-configuration-cache --console=plain`
-from `mod/`, then `game node tools/mp.mjs up --slot 92 --no-build ...`.
+from `mod/`, then `game node tools/multiplayer-harness.mjs up --slot 92 --no-build ...`.
 
 `--slot` is required (0..99), with the campaign's fixed port formulas. Slot 92 uses server
 25692, Foremen 27984/27985 and DevBridges 8084/8085. `--clients` defaults to 2 and accepts 1.
@@ -299,13 +299,13 @@ for port/CLI, launch isolation, memory caps, PID recovery, cleanup and library c
 ## Dev / QA tools
 
 ```powershell
-node tools/devcli.mjs state --port 7889                 # DevBridge CLI (mod/DEV.md has the full command list)
-node tools/foremancli.mjs status --port 27878           # Foreman: backend/auth, agents, tasks, open decisions
-node tools/foremancli.mjs diff --decision d3 --port 27878
-node tools/foremancli.mjs send user.message to=kit "text=hi there" --port 27878   # any client message, prints the ack
-node tools/shoot.mjs tools/scenes/qa.json --only qa01_exterior_hero --port 7889 --foreman 27878 --prefix wip/
-node tools/qa.mjs --port 27878 --dev-port 7889 --home C:\Projects\agentcraft\.agentcraft-home
-node tools/record.mjs tools/shots/desk_story.json --port 7889 --hold 3000   # play a camera shot for OBS (shots/README.md)
+node tools/devbridge-cli.mjs state --port 7889                 # DevBridge CLI (mod/DEV.md has the full command list)
+node tools/foreman-cli.mjs status --port 27878           # Foreman: backend/auth, agents, tasks, open decisions
+node tools/foreman-cli.mjs diff --decision d3 --port 27878
+node tools/foreman-cli.mjs send user.message to=kit "text=hi there" --port 27878   # any client message, prints the ack
+node tools/capture-screenshots.mjs tools/scenes/qa.json --only qa01_exterior_hero --port 7889 --foreman 27878 --prefix wip/
+node tools/run-screenshot-qa.mjs --port 27878 --dev-port 7889 --home C:\Projects\agentcraft\.agentcraft-home
+node tools/play-camera-shots.mjs tools/shots/desk_story.json --port 7889 --hold 3000   # play a camera shot for OBS (shots/README.md)
 npm test --prefix tools
 ```
 
@@ -316,9 +316,9 @@ Screenshot QA (scene format, anchor contract, judging): [docs/QA.md](../docs/QA.
 | `launch.ps1`, `stop.ps1`, `launch.cmd`, `stop.cmd` | launcher |
 | `lib/procs.ps1` | shared PowerShell helpers (run files, process identity, Ctrl+Break, ports) |
 | `lib/bgrun.mjs` | background runner: owns the log files and the hidden console of a background process |
-| `devcli.mjs`, `lib/devclient.mjs` | DevBridge client |
-| `foremancli.mjs`, `lib/foremanclient.mjs` | Foreman WS client (hello, acks, diff, live state mirror) |
-| `shoot.mjs`, `lib/scene.mjs` | scene runner (anchors, screens, Foreman messages, waits) |
-| `record.mjs`, `shots/*.json` | real-time shot player for screen recording (`dev.play`: camera paths, timed Foreman injections, typing); format in `shots/README.md` |
-| `qa.mjs`, `lib/contactsheet.mjs`, `scenes/qa.json` | QA suite, contact sheet (pngjs) |
+| `devbridge-cli.mjs`, `lib/devclient.mjs` | DevBridge client |
+| `foreman-cli.mjs`, `lib/foremanclient.mjs` | Foreman WS client (hello, acks, diff, live state mirror) |
+| `capture-screenshots.mjs`, `lib/scene.mjs` | scene runner (anchors, screens, Foreman messages, waits) |
+| `play-camera-shots.mjs`, `shots/*.json` | real-time shot player for screen recording (`dev.play`: camera paths, timed Foreman injections, typing); format in `shots/README.md` |
+| `run-screenshot-qa.mjs`, `lib/contactsheet.mjs`, `scenes/qa.json` | QA suite, contact sheet (pngjs) |
 | `scenes/qa-selftest.json` | runner self-test |

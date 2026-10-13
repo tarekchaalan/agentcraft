@@ -13,11 +13,11 @@ try {
   const opt = parseOptions(process.argv.slice(2), root);
   if (opt.help) {
     console.log(`AgentCraft multiplayer harness
-  node tools/mp.mjs up --slot N [--clients 1|2] [--backend sim|claude]
+  node tools/multiplayer-harness.mjs up --slot N [--clients 1|2] [--backend sim|claude]
       [--home PATH] [--profile NAME] [--server-heap 2G] [--client-heap 2G]
       [--timeout 600] [--gradle-command EXECUTABLE] [--no-build] [--json]
-  node tools/mp.mjs down --slot N [--json]
-  node tools/mp.mjs status --slot N [--json]
+  node tools/multiplayer-harness.mjs down --slot N [--json]
+  node tools/multiplayer-harness.mjs status --slot N [--json]
 Slot: 0..99. Default: 2 clients, sim, project .agentcraft-home, profile mp-N.
 Requires npm ci in tools/ and foreman/, Java 25. Logs/records: artifacts/run/mp-N/.
 Heap env: AGENTCRAFT_MP_SERVER_HEAP / AGENTCRAFT_MP_CLIENT_HEAP.

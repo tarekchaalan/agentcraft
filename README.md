@@ -182,12 +182,12 @@ Install Java 25 (`brew install openjdk@25` on macOS; your distribution's JDK 25 
 ```sh
 git clone https://github.com/tarekchaalan/agentcraft
 cd agentcraft
-node tools/unix.mjs launch --backend sim                                  # try the studio, no API usage
-node tools/unix.mjs stop --profile sim
-node tools/unix.mjs login                                                 # sign the agents' Claude Code in, once
-node tools/unix.mjs launch --repo /path/to/your/repo --use-claude-login   # any existing folder works
-node tools/unix.mjs launch --world survival --repo /path/to/your/repo     # the survival world
-node tools/unix.mjs stop
+node tools/launch-unix.mjs launch --backend sim                                  # try the studio, no API usage
+node tools/launch-unix.mjs stop --profile sim
+node tools/launch-unix.mjs login                                                 # sign the agents' Claude Code in, once
+node tools/launch-unix.mjs launch --repo /path/to/your/repo --use-claude-login   # any existing folder works
+node tools/launch-unix.mjs launch --world survival --repo /path/to/your/repo     # the survival world
+node tools/launch-unix.mjs stop
 ```
 
 The first launch installs npm dependencies and lets Gradle download Minecraft and Fabric, which
@@ -473,7 +473,7 @@ cd foreman; npm test                       # 634 tests
 cd tools; npm test                         # 74 tests
 cd mod; .\gradlew.bat test                 # 332 mod unit tests
 cd mod; .\gradlew.bat build                # the mod, plus 116 Fabric game tests on a headless server
-node tools/qa.mjs --home .agentcraft-home  # capture the screenshot QA gallery
+node tools/run-screenshot-qa.mjs --home .agentcraft-home  # capture the screenshot QA gallery
 ```
 
 Every visual in this README was captured in game through the **DevBridge**, a small localhost API in

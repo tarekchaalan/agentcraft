@@ -1,5 +1,5 @@
 {
-  "description": "Console, decisions, permissions and HUD shots (client.console / decisions / permissions / hud). Run against the showcase busy state: node tools/shoot.mjs tools/scenes/console.json --port <devPort> --foreman <foremanPort> --prefix console/. The permission shot shows the oldest open permission prompt, or a marked preview of a sample one when none is open (the showcase has none).",
+  "description": "Console, decisions, permissions and HUD shots (client.console / decisions / permissions / hud). Run against the showcase busy state: node tools/capture-screenshots.mjs tools/scenes/console.json --port <devPort> --foreman <foremanPort> --prefix console/. The permission shot shows the oldest open permission prompt, or a marked preview of a sample one when none is open (the showcase has none).",
   "foreman": { "connect": true },
   "defaults": { "time": 12000, "weather": "clear", "hideHud": true, "mode": "spectator", "fov": 70 },
   "waitFor": [

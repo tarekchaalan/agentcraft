@@ -36,7 +36,7 @@ Changes from the handoff's sequence, and why:
   1. `gradlew build` is green, including the JUnit tests from MP-F and the game tests from MP-T where present.
   2. `npm run check` is green in `foreman/` and `npm test` in `tools/` if the packet touched them, on Node ≥ 22.18 (A-05).
   3. Every new telemetry event has a capture test.
-  4. **Singleplayer is unchanged:** a packet that touches the HQ, rendering or agents runs `node tools/qa.mjs` (with its port block and home) and compares the contact sheet to the MP-F baseline run. It records the run id in its worknote and Reads the PNGs before claiming no change.
+  4. **Singleplayer is unchanged:** a packet that touches the HQ, rendering or agents runs `node tools/run-screenshot-qa.mjs` (with its port block and home) and compares the contact sheet to the MP-F baseline run. It records the run id in its worknote and Reads the PNGs before claiming no change.
   5. The worknote is written.
   6. `/code-review` has run, and `/security-review` too for any packet marked **(sec)**.
 - **Status vocabulary:** Ready, BlockedDependency, BlockedDecision, Writing, Review, Integrated, UATPending, Done.
@@ -225,9 +225,9 @@ A packet never edits a test file or a fixture that MP-F or another packet create
 | Packet | Owned files | Must not touch |
 |---|---|---|
 | **MP-F** Foundation | everything under `main/mp/` and `client/mp/` listed in the contract (new), the F-stub files below (new, empty), `main/layout/Anchors.java`, `main/hq/HqBuilder.java`, `main/AgentCraft.java` and `client/ClientFeatures.java` (one wiring line per multiplayer feature, all at once), `mod/build.gradle` (`test` block: JUnit 5 only), `mod/src/test/java/**` (new) | every other existing file |
-| **MP-B** Baseline | `foreman/package.json` and `tools/package.json` (`engines` → `>=22.18`), `tools/launch.ps1` and `tools/mac.mjs` (a Node version check with a clear message), `README.md` (Quick start: "Node 22.18+") | everything else |
+| **MP-B** Baseline | `foreman/package.json` and `tools/package.json` (`engines` → `>=22.18`), `tools/launch.ps1` and `tools/launch-unix.mjs` (a Node version check with a clear message), `README.md` (Quick start: "Node 22.18+") | everything else |
 | **MP-T** Game tests | `mod/build.gradle` (game-test source set, `runGameTest`, and `mcSources` ordering after `compileJava`), `mod/src/gametest/**` (new: one smoke test that boots, builds the HQ at plot 0 and checks 69 anchors) | `mod/src/main/**`, `mod/src/client/**` |
-| **MP-H** Harness | `tools/mp.mjs` (new), `tools/lib/mp/**` (new), `tools/test/mp-*.test.mjs` (new), `tools/README.md` (a "Multiplayer harness" section) | `tools/launch.ps1`, `tools/mac.mjs`, `tools/qa.mjs`, `tools/lib/*.mjs` that exist today (call them, don't change them) |
+| **MP-H** Harness | `tools/multiplayer-harness.mjs` (new), `tools/lib/mp/**` (new), `tools/test/mp-*.test.mjs` (new), `tools/README.md` (a "Multiplayer harness" section) | `tools/launch.ps1`, `tools/launch-unix.mjs`, `tools/run-screenshot-qa.mjs`, `tools/lib/*.mjs` that exist today (call them, don't change them) |
 | **MP-01** Server mode and world rules | `main/world/HqWorld.java`, `client/AutoWorld.java`, `client/ClientEnv.java`, `main/mp/server/world/ServerWorldFeature.java` (F-stub) | `HqFeature.java` (MP-03) |
 | **MP-02** Build at an offset | `main/hq/Plan.java`, `main/hq/PlanStore.java`, `main/hq/StudioHqBuilder.java` (pass `origin` to `Plan` and the anchors builder only; no geometry edits), `mod/src/gametest/**/BuildAtOffsetTest.java` (new) | `HqLandscape.java`, `HqFeature.java`, `TestRoomBuilder.java` |
 | **MP-03** Plots: registry, lifecycle, commands **(sec)** | `main/hq/HqFeature.java`, `main/command/AgentCraftCommands.java`, `main/mp/server/plot/**` (`PlotFeature.java` F-stub; `PlotRegistry.java`, `PlotStore.java`, `PlotCommands.java`, `PlotSpawn.java` new), gametests under `mp/plot/` (new) | `Plan.java`, `PlanStore.java` (MP-02), `HqWorld.java` (MP-01) |
@@ -298,7 +298,7 @@ Wave 3  MP-Z Close-out: docs, enabled-by-default in the shipped server config, o
 Scope: everything in [§ Contract fixed by MP-F](#contract-fixed-by-mp-f), real where stated, plus:
 
 - the F-stub files: `main/mp/server/{world/ServerWorldFeature, plot/PlotFeature, layout/LayoutSyncFeature, relay/RelayFeature, intent/WorldIntentFeature, protect/PlotProtectionFeature}.java` and `client/mp/{layout/LayoutSyncClient, publish/PublishFeature, remote/RemoteStudiosFeature, visitor/VisitorFeature}.java`, each an empty `init()`, all wired in `AgentCraft` / `ClientFeatures`;
-- a **singleplayer QA baseline**: run `node tools/qa.mjs` on the MP-F branch before merge and record the run id. Every later packet compares against it.
+- a **singleplayer QA baseline**: run `node tools/run-screenshot-qa.mjs` on the MP-F branch before merge and record the run id. Every later packet compares against it.
 
 Nothing player-visible changes: `enabled` defaults to false, singleplayer never sends a payload, and `Anchors.current()` behaves as today.
 
@@ -320,7 +320,7 @@ Tests:
 
 ## MP-B: baseline
 
-**Status: Ready.** Tiny. Bump `engines` to `>=22.18` in `foreman/` and `tools/`. Make `launch.ps1` and `mac.mjs` fail early with "Node 22.18 or newer is required (you have X)". Update the README prerequisite. **Precondition (owner or coordinator):** install Node ≥ 22.18 on every worker machine. Done when `npm run check` is 482/482 on this machine (A-04, A-05).
+**Status: Ready.** Tiny. Bump `engines` to `>=22.18` in `foreman/` and `tools/`. Make `launch.ps1` and `launch-unix.mjs` fail early with "Node 22.18 or newer is required (you have X)". Update the README prerequisite. **Precondition (owner or coordinator):** install Node ≥ 22.18 on every worker machine. Done when `npm run check` is 482/482 on this machine (A-04, A-05).
 
 ## MP-T: game tests
 
@@ -330,7 +330,7 @@ Tests:
 
 **Status: Ready** (it uses today's mod; nothing in MP-F is needed to start). Writer: general-purpose (Node).
 
-Scope: `node tools/mp.mjs up --slot <n> [--clients 2] [--backend sim]` starts, all derived from the slot's port block:
+Scope: `node tools/multiplayer-harness.mjs up --slot <n> [--clients 2] [--backend sim]` starts, all derived from the slot's port block:
 
 - a local dedicated server (`runServer` or a direct Fabric dev launch from Loom's generated launch config; `online-mode=false`, `level-name`, superflat as in A-39, the two test players opped, `config/agentcraft-server.json` with `enabled: true`);
 - one sim Foreman per client (`--profile mp-<n>-a/b`, own ports);
@@ -652,7 +652,7 @@ What remains for multiplayer:
 
 - Seed `config/agentcraft-server.json` from `deploy/server/config/` with `enabled: true` and the plot settings (contract in MP-F). Extend the release smoke test: a plot is allocated for a fake join (gametest hook or RCON `agentcraft plot assign`) and `HelloS2C` is sent.
 - Decide whether multiplayer servers keep the level name `AgentCraft HQ` once MP-01 makes the rules config-driven.
-- Write `docs/multiplayer/player-install.md`: Fabric loader, Fabric API and the mod jar for 26.3, plus running your own Foreman (`tools\launch.ps1 -NoGame` or `node tools/mac.mjs launch --no-game`) and joining.
+- Write `docs/multiplayer/player-install.md`: Fabric loader, Fabric API and the mod jar for 26.3, plus running your own Foreman (`tools\launch.ps1 -NoGame` or `node tools/launch-unix.mjs launch --no-game`) and joining.
 
 **Never commit the colo's address, hostname, SSH alias or credentials; `.env` is gitignored.**
 

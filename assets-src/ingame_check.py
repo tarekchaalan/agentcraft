@@ -15,7 +15,7 @@ What it does
      .gradle-home; DevBridge on port 7893 (AGENTCRAFT_ARTCHECK_PORT) so it never collides with
      another client; muted and never focused - the mod's defaults). It refuses to start while
      any other Minecraft client is running (one client at a time on a shared GPU) or the port is busy.
-  3. Drives tools/shoot.mjs through ingame_scene.json -> PNGs in artifacts/art/ingame/.
+  3. Drives tools/capture-screenshots.mjs through ingame_scene.json -> PNGs in artifacts/art/ingame/.
   4. Quits through the DevBridge, waits for the processes it started, and scans the client log for
      resource errors (models, blockstates, textures, sprites) -> artifacts/art/ingame/report.json.
 Our blocks are not registered yet (that is integration's job), so models are shown on vanilla
@@ -299,18 +299,18 @@ def main():
     print(f"runClient started (pid {proc.pid}), log {log_path}")
     report = {"pid": proc.pid, "port": PORT}
     try:
-        r = node("tools/shoot.mjs", str(sc), "--port", str(PORT), "--manifest", str(SHOTS / "manifest.json"))
+        r = node("tools/capture-screenshots.mjs", str(sc), "--port", str(PORT), "--manifest", str(SHOTS / "manifest.json"))
         report["shoot_exit"] = r.returncode
         report["shoot_stderr_tail"] = r.stderr[-3000:]
         try:
             report["shoot"] = json.loads(r.stdout)
         except ValueError:
             report["shoot_stdout_tail"] = r.stdout[-3000:]
-        st = node("tools/devcli.mjs", "state", "--port", str(PORT), timeout=60)
+        st = node("tools/devbridge-cli.mjs", "state", "--port", str(PORT), timeout=60)
         report["state"] = st.stdout[-4000:]
     finally:
         if not a.keep_open:
-            q = node("tools/devcli.mjs", "quit", "--port", str(PORT), timeout=120)
+            q = node("tools/devbridge-cli.mjs", "quit", "--port", str(PORT), timeout=120)
             report["quit"] = (q.returncode, q.stdout[-500:])
             try:
                 proc.wait(timeout=180)

@@ -4,7 +4,7 @@
 // (tools\launch.ps1 -Dev ...). Shot format and examples: tools/shots/README.md; internals:
 // mod/DEV.md "Shot playback".
 //
-//   node tools/record.mjs tools/shots/hq_orbit.json [more.json ...] [--port N] [--hold MS]
+//   node tools/play-camera-shots.mjs tools/shots/hq_orbit.json [more.json ...] [--port N] [--hold MS]
 //        [--stills t1,t2,...] [--window WxH] [--no-setup] [--verbose]
 //
 //   --hold MS       after the setup, keep the first frame of the shot on screen for MS ms before
@@ -45,11 +45,11 @@ for (let i = 0; i < argv.length; i++) {
 if (!files.length) usage(2);
 
 function usage(code) {
-  console.error('usage: node tools/record.mjs <shot.json> [more.json ...] [--port N] [--hold MS] [--stills t1,t2] [--window WxH] [--no-setup] [--verbose]');
+  console.error('usage: node tools/play-camera-shots.mjs <shot.json> [more.json ...] [--port N] [--hold MS] [--stills t1,t2] [--window WxH] [--no-setup] [--verbose]');
   process.exit(code);
 }
 
-const log = (m) => process.stderr.write(`[record] ${m}\n`);
+const log = (m) => process.stderr.write(`[play-camera-shots] ${m}\n`);
 const vlog = (m) => opt.verbose && log(m);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// QA runner: showcase Foreman + game (Windows launch.ps1, or unix.mjs on macOS and Linux), the QA scene, a contact
+// QA runner: showcase Foreman + game (Windows launch.ps1, or launch-unix.mjs on macOS and Linux), the QA scene, a contact
 // sheet and a manifest, then it stops exactly what it started. See docs/QA.md.
 //
-//   node tools/qa.mjs [--showcase busy|late] [--scene tools/scenes/qa.json] [--only qa01_exterior_hero,...]
+//   node tools/run-screenshot-qa.mjs [--showcase busy|late] [--scene tools/scenes/qa.json] [--only qa01_exterior_hero,...]
 //        [--port 7878] [--dev-port 7879] [--home <dir>] [--profile <name>] [--run-id <id>]
 //        [--keep] [--no-launch] [--strict] [--stop-daemon] [--no-restore] [--columns 3]
 //
@@ -26,7 +26,7 @@ import { contactSheet, COLORS } from './lib/contactsheet.mjs';
 
 const TOOLS = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(TOOLS, '..');
-const log = (m) => process.stderr.write(`[qa] ${m}\n`);
+const log = (m) => process.stderr.write(`[run-screenshot-qa] ${m}\n`);
 
 // --- args ------------------------------------------------------------------------------------------
 const argv = process.argv.slice(2);
@@ -80,7 +80,7 @@ function runLauncher(action, args, logFile) {
       : process.execPath;
     const argv = windows
       ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(TOOLS, action === 'launch' ? 'launch.ps1' : 'stop.ps1'), ...args]
-      : [path.join(TOOLS, 'unix.mjs'), action, ...args];
+      : [path.join(TOOLS, 'launch-unix.mjs'), action, ...args];
     const child = spawn(command, argv, { cwd: ROOT, windowsHide: true });
     const out = fs.createWriteStream(logFile);
     const pipe = (d) => { out.write(d); process.stderr.write(String(d).replace(/^(?=.)/gm, '    ')); };
@@ -128,7 +128,7 @@ if (!opt['no-launch']) {
   }
   // something answering that launch.ps1 did not start (or another profile): use it as-is
   if (gameUp) log(`a game already answers on DevBridge :${devPort}; using it`);
-  log(`launching: ${windows ? 'tools/launch.ps1' : 'tools/unix.mjs launch'} ${args.join(' ')}${gameUp ? ' (game already running)' : ''}`);
+  log(`launching: ${windows ? 'tools/launch.ps1' : 'tools/launch-unix.mjs launch'} ${args.join(' ')}${gameUp ? ' (game already running)' : ''}`);
   launchCode = await runLauncher('launch', gameUp ? [...args, windows ? '-NoGame' : '--no-game'] : args, path.join(outDir, 'launch.log'));
   try { launch = JSON.parse(fs.readFileSync(launchSummaryPath, 'utf8').replace(/^\uFEFF/, '')); } catch {}
   if (launchCode !== 0) {

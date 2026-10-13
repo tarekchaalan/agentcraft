@@ -5,7 +5,7 @@
 // input is on, as with a real keyboard (dev.type calls charTyped directly and would pass even when real
 // typing is broken, which is what happened to the card's first message line).
 //
-//   node tools/agents-typing.mjs --port 7902 [--agent kit] [--prefix agents_typing/] [--send]
+//   node tools/check-agent-card-typing.mjs --port 7902 [--agent kit] [--prefix agents_typing/] [--send]
 //
 // Checks: with the card open and the line closed, typing produces no text and SDL text input is off;
 // pressing M opens the line without a stray "m" and turns text input on; typed words arrive; a long

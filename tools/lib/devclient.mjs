@@ -1,5 +1,5 @@
 // DevBridge client: connects to the mod's localhost WebSocket (default ws://127.0.0.1:7879)
-// and sends JSON requests matched by id. Used by devcli.mjs, shoot.mjs and QA tooling.
+// and sends JSON requests matched by id. Used by devbridge-cli.mjs, capture-screenshots.mjs and QA tooling.
 //
 //   import { DevClient } from './lib/devclient.mjs';
 //   const dev = await DevClient.connect({ timeoutMs: 120_000 });

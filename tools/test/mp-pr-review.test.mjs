@@ -284,7 +284,7 @@ test('PR11: an interruption or a lost process while dev.state is pending is seen
   await assert.rejects(waitForClients(local, { timeoutMs: 1000, now: () => 0, delay: async () => assert.fail('must not poll again'),
     check: () => { checks++; if (interrupted) throw new Error('launcher interrupted'); },
     command: async (plan, id) => {
-      interrupted = true; // mp.mjs only sets a flag on SIGINT/SIGTERM
+      interrupted = true; // multiplayer-harness.mjs only sets a flag on SIGINT/SIGTERM
       const client = plan.clients.find(c => c.id === id);
       return { ok: true, ready: true, world: { name: null, dimension: 'minecraft:overworld' }, player: { name: client.username },
         foreman: { connected: true, url: `ws://127.0.0.1:${client.foremanPort}` } };

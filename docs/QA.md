@@ -11,14 +11,14 @@ In a fresh clone, install the QA runner's dependencies first with `npm ci --pref
 
 ```sh
 # the normal QA run: starts what is missing, shoots, writes the sheet, stops what it started
-node tools/qa.mjs --port 27878 --dev-port 7889 --home /path/to/agentcraft/.agentcraft-home
+node tools/run-screenshot-qa.mjs --port 27878 --dev-port 7889 --home /path/to/agentcraft/.agentcraft-home
 
-node tools/qa.mjs ... --showcase late             # the later state (blocked, error, done agents)
-node tools/qa.mjs ... --only qa03_task_wall,qa04_agent_desk --run-id 20261001-2310   # re-shoot into an existing run
-node tools/qa.mjs ... --keep                      # leave Foreman + game running (fast re-runs)
-node tools/qa.mjs ... --no-launch                 # use what is already running, never start/stop anything
-node tools/qa.mjs ... --strict                    # skipped shots fail the run (use once the HQ has every anchor)
-node tools/qa.mjs ... --stop-daemon               # also stop this checkout's Gradle daemon at the end
+node tools/run-screenshot-qa.mjs ... --showcase late             # the later state (blocked, error, done agents)
+node tools/run-screenshot-qa.mjs ... --only qa03_task_wall,qa04_agent_desk --run-id 20261001-2310   # re-shoot into an existing run
+node tools/run-screenshot-qa.mjs ... --keep                      # leave Foreman + game running (fast re-runs)
+node tools/run-screenshot-qa.mjs ... --no-launch                 # use what is already running, never start/stop anything
+node tools/run-screenshot-qa.mjs ... --strict                    # skipped shots fail the run (use once the HQ has every anchor)
+node tools/run-screenshot-qa.mjs ... --stop-daemon               # also stop this checkout's Gradle daemon at the end
 ```
 
 Defaults: `--port`/`--dev-port` come from `AGENTCRAFT_PORT`/`AGENTCRAFT_DEV_PORT` or 7878/7879.
@@ -32,7 +32,7 @@ works. At most one game per checkout.
 What a run does:
 
 1. Starts (or reuses) a **showcase Foreman** and the **game** with
-   `tools/launch.ps1` on Windows or `tools/unix.mjs` on macOS and Linux (muted, never
+   `tools/launch.ps1` on Windows or `tools/launch-unix.mjs` on macOS and Linux (muted, never
    steals focus, no toasts). Whatever was already running is reused and left running.
 2. Waits for a ready world and for the Foreman to hold the showcase state
    (`foreman.status.showcase`), then asks the mod for its camera anchors (`dev.anchors`).
@@ -137,12 +137,12 @@ half-synced world. Expected shape (filled in by the Foreman link's state contrib
 `{"connected": true, "port": 7878, ...}`. If a mod build never reports it, the wait is skipped
 after 5 s and noted in the run log.
 
-## Scene format (tools/lib/scene.mjs; shoot.mjs and qa.mjs share it)
+## Scene format (tools/lib/scene.mjs; capture-screenshots.mjs and run-screenshot-qa.mjs share it)
 
 ```jsonc
 {
   "description": "...",
-  "foreman": { "connect": true },             // shoot.mjs connects to the Foreman (AGENTCRAFT_PORT/7878 or --foreman N)
+  "foreman": { "connect": true },             // capture-screenshots.mjs connects to the Foreman (AGENTCRAFT_PORT/7878 or --foreman N)
   "defaults": { "time": 12000, "weather": "clear", "hideHud": true, "mode": "spectator", "fov": 70 },
   "anchors": { "cam_x": { "x": 0, "y": 70, "z": 0, "yaw": 0, "pitch": 10 } },   // fallback anchor table (the mod's dev.anchors wins)
   "setup": ["/time set 12000"],               // commands once before the shots
@@ -199,10 +199,10 @@ Older scene files keep working: a bare array of shots, and `delayMs` as another 
 2. Add the shot to `tools/scenes/qa.json` (or a new scene file for non-QA sets). Prefer anchors;
    give a raw `camera` only when the subject does not depend on the HQ layout.
 3. Iterate on one shot quickly against a running game:
-   `node tools/shoot.mjs tools/scenes/qa.json --only qa04_agent_desk --port 7889 --foreman 27878 --prefix wip/`
+   `node tools/capture-screenshots.mjs tools/scenes/qa.json --only qa04_agent_desk --port 7889 --foreman 27878 --prefix wip/`
    and Read `artifacts/shots/wip/qa04_agent_desk.png`. `--anchors my.json` overrides anchors for
    experiments; `offset` nudges an anchor from the scene.
-4. Run the full suite (`node tools/qa.mjs ...`) and Read the contact sheet.
+4. Run the full suite (`node tools/run-screenshot-qa.mjs ...`) and Read the contact sheet.
 5. Keep the visual-bar.md QA list and this file in sync if the set itself changes.
 
 ## How judges score
@@ -260,13 +260,13 @@ The bar: every shot >= 8 on every applicable axis from independent judges.
 | warning `the game was paused during the capture` | a pause menu opened (see mod/DEV.md known issues); `dev.camera` closes it before each shot |
 | `aborting: the game looks hung` | `tools\stop.ps1 -Game` (dev.quit force-exits a hung game), then re-run |
 | launch fails `port N is already in use by pid ...` | another Foreman/game owns that port: use your own port pair |
-| launch fails `a Minecraft client of this checkout is already running` | one client per checkout (shared `mod/run`): quit it (`node tools/devcli.mjs quit --port N`) |
+| launch fails `a Minecraft client of this checkout is already running` | one client per checkout (shared `mod/run`): quit it (`node tools/devbridge-cli.mjs quit --port N`) |
 
 ## Testing the tools themselves
 
 ```powershell
 npm test --prefix tools      # node:test: scene runner (fake DevBridge/Foreman), Foreman client (fake WS server), contact sheet
-node tools/shoot.mjs tools/scenes/qa-selftest.json --port 7889 --foreman 27878 --prefix selftest/
+node tools/capture-screenshots.mjs tools/scenes/qa-selftest.json --port 7889 --foreman 27878 --prefix selftest/
 ```
 
 `qa-selftest.json` exercises the scene-anchor fallback table, raw camera + offset, a vanilla

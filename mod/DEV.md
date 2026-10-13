@@ -101,7 +101,7 @@ Delete `mod/run/saves/AgentCraft HQ` (or `AgentCraft Survival`) to start over wi
 | `AGENTCRAFT_DEV_TEST` | 0 | `1` registers test-only commands (`dev.test.stall`, which blocks the render thread to simulate a hung game; `dev.test.foremanMessage`). Never set it for real use |
 | `AGENTCRAFT_PORT` | 7878 | Foreman WebSocket port the mod connects to (always 127.0.0.1) |
 | `AGENTCRAFT_FOREMAN` | 1 | `0` disables the Foreman link (the HUD says so) and the Foreman launcher |
-| `AGENTCRAFT_LAUNCHER` | config.json `launcher.enabled` (true) | `0`: the mod does not start the Foreman when the game starts (`/foreman start` in the console still can). `tools/launch.ps1 -NoForeman` and `tools/unix.mjs --no-foreman` set `0` unless you set it yourself. See "Foreman launcher" |
+| `AGENTCRAFT_LAUNCHER` | config.json `launcher.enabled` (true) | `0`: the mod does not start the Foreman when the game starts (`/foreman start` in the console still can). `tools/launch.ps1 -NoForeman` and `tools/launch-unix.mjs --no-foreman` set `0` unless you set it yourself. See "Foreman launcher" |
 | `AGENTCRAFT_LAUNCHER_STOP_ON_EXIT` | config.json `launcher.stopOnExit` (false) | `1`: stop the Foreman when the game exits, and only one the mod started |
 | `AGENTCRAFT_FOREMAN_DIR` | `launcher.foremanDir`, else a dev run's own checkout, else the checkout the jar was built from | The checkout (or its `foreman/`) the launcher runs the Foreman from |
 | `AGENTCRAFT_NODE` | `launcher.nodePath`, else discovered | Node 22+ binary (or its folder) for the launcher |
@@ -185,7 +185,7 @@ treated the same, other binary frames get an `ok:false` reply).
 | `dev.foreman.inject` | exactly one of `message:{type,...}`, `patch:{agent\|task: id, set:{wire fields}}`, `say:{agent, text, to?}` | Applies to the mod's Foreman model **as if the Foreman had sent it** (always available; bypasses the hold queue). `patch` copies the current agent/task, replaces the given wire fields (`{"station":"desk","state":"editing"}`, `{"status":"doing","assignee":"marlow"}`, `null` clears) and applies it as an `agent.upsert`/`task.upsert`; `say` is an `agent.say` stamped now. Replies `{applied, message}`. Video choreography; the next snapshot (reconnect) undoes it |
 | `dev.foreman.hold` | `on` (bool), `release?` = `reconnect` (default) / `replay` / `drop` | `on:true`: live Foreman messages are queued instead of applied, so a shot shows only what it injects. `on:false` releases them: `reconnect` drops the queue and reconnects (fresh snapshot), `replay` applies the queue, `drop` discards it. `dev.state.foreman.held/heldQueued` show it |
 | `dev.play` | `duration` (s), `camera`, `timeline?`, `name?`, `showHud?` (false), `holdEndMs?` (300), `foreman?:{hold?, release?}`, `log?` (true) | **Real-time shot playback** for a screen recorder (OBS). See "Shot playback" below. Replies when the shot is done: `{frames, resolution, perf{fps, frameMsMedian/P99/Max, framesOver20ms, pathStepMsMin/Max}, cameraVsPath{maxPosError, maxRotError, maxFovError}, events[{t, at, event, ok, error?}], warnings, frameLog}` |
-| `dev.play.pose` | `camera`, `t?` (0), `duration?` | Where a camera path is at time t: `{pose{x,y,z,yaw,pitch,fov}, start, end}` (eye position). `record.mjs` puts the camera there with `dev.camera` before playing; also handy to preview a path with stills |
+| `dev.play.pose` | `camera`, `t?` (0), `duration?` | Where a camera path is at time t: `{pose{x,y,z,yaw,pitch,fov}, start, end}` (eye position). `play-camera-shots.mjs` puts the camera there with `dev.camera` before playing; also handy to preview a path with stills |
 | `dev.play.status` / `dev.play.stop` | | Progress of the playing shot / stop it (its `dev.play` replies `ok:false`) |
 | `dev.window` | `width`, `height` | Resizes the game window (windowed mode, `Window.setWindowed`), e.g. 2560x1440 to fill the monitor for a capture; replies once a frame was rendered at the new size `{width, height, framebufferWidth/Height, renderWidth/Height}` |
 | `dev.agents` | `settle?` (false) | Every agent NPC: `id, entityId, x,y,z, yaw, station, anchor, target{x,y,z,yaw}, walking, path[[x,y,z]...], state, activity, stale, model, skin`, and `plate{mode full\|compact, lift, target, rank, nudge, scale, depth, weight, focused, capped, rect[x0,y0,x1,y1] in screen px}` when its nameplate was laid out last frame; top level also has `plates, plateOverlaps`; `dev.state.agents` also has `plateOverlapPairs` ("rowan/wren": which plates overlapped last frame) and `exclaims`. `settle:true` snaps walking agents to their targets and the nameplates to their final layout on the next frame (no one mid-walk, no plate mid-slide in a shot) |
@@ -194,7 +194,7 @@ treated the same, other binary frames get an `ok:false` reply).
 | `dev.agents.card` | `agent` | Opens the agent card for that agent (like right-clicking it) |
 | `dev.agents.freezeEntityTick` | `on?` (bool) | Skips every agent's entity tick, as Entity Culling's `tickCulling` does for entities out of view (see "Compatibility: entity tick culling"); agents must keep walking through `AgentManager`'s catch-up. Always returns `{on, entityAdvances, catchUpAdvances, moving}` summed over agents: with `on:false`, `catchUpAdvances` must not grow |
 | `dev.agents.fx` | `agent`, `fx` = `confetti`/`puff`/`sparkle`/`say`, `text?`, `to?` | Plays an agent effect now (QA preview; `say` shows a local speech bubble, nothing is sent) |
-| `dev.agents.keys` | `keys` (comma-separated: key names `space return escape back tab left right`, or text typed letter by letter, a-z 0-9 space) | **Test only** (`AGENTCRAFT_DEV_TEST=1`): presses keys as SDL reports a keyboard (SDL events queued for the game window, one key every 3 frames, through Minecraft's SDL event loop; printable keys produce text events only while SDL text input is on). Returns `{pressed, textEvents, screen, input?, textInputActive}`. `tools/agents-typing.mjs` uses it to check the agent card's message line |
+| `dev.agents.keys` | `keys` (comma-separated: key names `space return escape back tab left right`, or text typed letter by letter, a-z 0-9 space) | **Test only** (`AGENTCRAFT_DEV_TEST=1`): presses keys as SDL reports a keyboard (SDL events queued for the game window, one key every 3 frames, through Minecraft's SDL event loop; printable keys produce text events only while SDL text input is on). Returns `{pressed, textEvents, screen, input?, textInputActive}`. `tools/check-agent-card-typing.mjs` uses it to check the agent card's message line |
 | `dev.test.foremanMessage` | `message:{type, ...}` | **Test only** (`AGENTCRAFT_DEV_TEST=1`): applies a Foreman message to the state model as if received (e.g. `foreman.status` with `auth:"failed"` to see the auth banner) |
 | `dev.displays` | `look?` = `paper` / `dark` / `split`, `reset?` | Monitor look (default dark; split alternates per monitor for comparisons), every laid-out monitor screen `{pos, agent, mode, style, size, ppb, rows, ageMs}`, and `stats` = display CPU cost per frame since the last reset (`monitor`/`board`: `usPerFrame`, `callsPerFrame`, `rebuilds`) |
 | `dev.taskwall` | `open?` (task id), `press?` (button id), `aim?` (task id), `board?` ("x y z" origin for `aim`), `lightFloor?` (0-15), `ppb?` (0-256, 0 = auto), `relayout?` | Task Wall boards and their cards (column counts, widths and cards per row, hidden ids, card positions, size full/brief/compact, title lines, state dot, glowing, `layoutUs` of the last re-plan). `lightFloor`/`ppb` override the block-light floor and the pixel density for A/B shots, `relayout` forces a re-plan. `open` opens that task's screen, `press` presses a button in the open task screen (`prev next retry prioritize reassign cancel to:<agent>`), `aim` returns the world point of a card and an eye 2.5 blocks in front (then `dev.camera` + `dev.key {mapping:"key.use"}` clicks it the real way; use `mode:"creative"`, spectators cannot click) |
@@ -223,7 +223,7 @@ Register in `onInitializeClient`. Built-ins are registered when the bridge start
 `Fields` (`num`, `num(min,max)`, `optNum`, `integer`, `optInt`, `optLong`, `bool`, `optBool`, `str`,
 `nonBlank`, `optStr`, `obj`, `optObj`) refuses NaN/Infinity, wrong JSON types and out-of-range values.
 
-### Shot playback (`dev.play`, `tools/record.mjs`)
+### Shot playback (`dev.play`, `tools/play-camera-shots.mjs`)
 
 Plays a choreographed camera shot **in real time** so a screen recorder (OBS, 60 fps window
 capture) films it. Code: `client.dev.play` (`ShotPlayer`, `CameraPath`, `Timeline`, `PlayCommands`);
@@ -336,7 +336,7 @@ no hub, so the console's `/foreman` and the HUD pill replace its Status tab.
    identity comes from the run files `<home>/*/foreman.json` on our port, which now also record
    `root` (the checkout) and `commit` (`git rev-parse HEAD` at start; foreman/src/main.ts). Who started
    it: the mod's record `<home>/<profile>/launcher.json` (pid and process start time), else
-   tools/launch.ps1's `artifacts/run/foreman-<profile>-*.json` or tools/unix.mjs's
+   tools/launch.ps1's `artifacts/run/foreman-<profile>-*.json` or tools/launch-unix.mjs's
    `unix-foreman-<profile>.json` in the checkout.
 4. **Decision** (`LauncherPlan.decide`). "Ours" is only the very process `launcher.json` names (same pid
    and start time); "current" means same checkout (real paths) and same commit as the checkout now.
@@ -388,7 +388,7 @@ no hub, so the console's `/foreman` and the HUD pill replace its Status tab.
 By default the Foreman keeps running after the game exits (agents keep working) and the next game
 reuses it.
 
-**With the launch scripts**: tools/launch.ps1 and tools/unix.mjs start (or reuse) the Foreman before
+**With the launch scripts**: tools/launch.ps1 and tools/launch-unix.mjs start (or reuse) the Foreman before
 the game, so the launcher finds it and reuses it (`/foreman`: "reused: started by tools\launch.ps1");
 tools\stop.ps1 stops it as before. `-NoForeman` / `--no-foreman` turn the launcher off unless the
 caller set `AGENTCRAFT_LAUNCHER`: `$env:AGENTCRAFT_LAUNCHER='1'; tools\launch.ps1 -NoForeman` lets a
@@ -563,7 +563,7 @@ name on the screen).
   then (camera space looks down -Z).
 - JSpecify `@Nullable` on a qualified nested type goes after the dot: `Anchors.@Nullable Bounds`.
 - Git Bash rewrites a leading slash in an argument into a Windows path (the command `/agentcraft hq`
-  arrived as `C:/Program Files/Git/agentcraft hq`). Use `devcli cmd "agentcraft hq"`; the slash is optional.
+  arrived as `C:/Program Files/Git/agentcraft hq`). Use `devbridge-cli cmd "agentcraft hq"`; the slash is optional.
 - A Foreman profile can only run once at a time. Parallel specialists must use their own `--profile`
   (and port).
 
@@ -585,28 +585,28 @@ parsed by `HudCommand`; not `/agentcraft hud`, which would shadow the server's o
 ## Tools (repo `tools/`, Node 22, local `ws` dependency: run `npm install` in tools/ once)
 
 ```bash
-node tools/devcli.mjs wait                         # wait for the bridge + a ready world (300 s)
-node tools/devcli.mjs state
-node tools/devcli.mjs camera -4 72 -8 -37.4 13.1 70        # x y z yaw pitch [fov]
-node tools/devcli.mjs camera 20 66.5 20 80 --look 9,67,9   # aim at a point
-node tools/devcli.mjs shot my_shot [--hud] [--frames 5] [--no-wait-chunks]
-node tools/devcli.mjs cmd "/fill 0 65 0 4 69 4 minecraft:oak_planks"
-node tools/devcli.mjs time 12000 | weather clear | hud off | screen pause | key escape | type "hi"
-node tools/devcli.mjs raw '{"type":"dev.waitChunks","timeoutMs":60000}'
-node tools/devcli.mjs quit                         # saves; waits for the bridge to close
-node tools/shoot.mjs tools/scenes/qa-selftest.json [--only a,b] [--manifest out.json] [--foreman N] [--verbose]
-node tools/record.mjs tools/shots/hq_orbit.json [more.json] [--hold 3000] [--stills 1,3] [--window 2560x1440]   # play shots for OBS (tools/shots/README.md)
+node tools/devbridge-cli.mjs wait                         # wait for the bridge + a ready world (300 s)
+node tools/devbridge-cli.mjs state
+node tools/devbridge-cli.mjs camera -4 72 -8 -37.4 13.1 70        # x y z yaw pitch [fov]
+node tools/devbridge-cli.mjs camera 20 66.5 20 80 --look 9,67,9   # aim at a point
+node tools/devbridge-cli.mjs shot my_shot [--hud] [--frames 5] [--no-wait-chunks]
+node tools/devbridge-cli.mjs cmd "/fill 0 65 0 4 69 4 minecraft:oak_planks"
+node tools/devbridge-cli.mjs time 12000 | weather clear | hud off | screen pause | key escape | type "hi"
+node tools/devbridge-cli.mjs raw '{"type":"dev.waitChunks","timeoutMs":60000}'
+node tools/devbridge-cli.mjs quit                         # saves; waits for the bridge to close
+node tools/capture-screenshots.mjs tools/scenes/qa-selftest.json [--only a,b] [--manifest out.json] [--foreman N] [--verbose]
+node tools/play-camera-shots.mjs tools/shots/hq_orbit.json [more.json] [--hold 3000] [--stills 1,3] [--window 2560x1440]   # play shots for OBS (tools/shots/README.md)
 ```
-`devcli` prints the JSON reply and exits 1 on `ok:false`. `--port` overrides the port. `--timeout`
-sets the connect timeout in seconds. `devcli release` hands the view back after dev camera use.
+`devbridge-cli` prints the JSON reply and exits 1 on `ok:false`. `--port` overrides the port. `--timeout`
+sets the connect timeout in seconds. `devbridge-cli release` hands the view back after dev camera use.
 `tools/lib/devclient.mjs` exports `DevClient` (`connect`, `request`, `call`, `waitInWorld`,
 `waitClosed`, `health`, `assertNotHung`) for other scripts. `health()` uses dev.ping and works on a
-hung game; `waitInWorld` (so `devcli wait` and `shoot.mjs`) fails fast with "game is hung" once the
-render thread has been stuck for 30 s, and `shoot.mjs` stops at the first failed shot if the game
+hung game; `waitInWorld` (so `devbridge-cli wait` and `capture-screenshots.mjs`) fails fast with "game is hung" once the
+render thread has been stuck for 30 s, and `capture-screenshots.mjs` stops at the first failed shot if the game
 looks hung (`hung` in its JSON summary) instead of timing out on every remaining shot. Relaunch by
-`devcli quit` (force-exits a hung game after 15 s) and `gradlew runClient`.
+`devbridge-cli quit` (force-exits a hung game after 15 s) and `gradlew runClient`.
 
-Scene format for shoot.mjs (full reference: docs/QA.md "Scene format"; examples in `tools/scenes/`):
+Scene format for capture-screenshots.mjs (full reference: docs/QA.md "Scene format"; examples in `tools/scenes/`):
 `{defaults, setup:[cmds], shots:[{name, anchor?, camera:{x,y,z,yaw,pitch | lookAt, fov}, time?, weather?,
 commands?, screen?, keepScreen?, hideHud?, frames?, waitMs?, waitChunks?}]}`, or a bare array of shots.
 Shots are written to `artifacts/shots/<name>.png`.
@@ -697,7 +697,7 @@ The module versions are listed under `.gradle-home/caches/modules-2/files-2.1/ne
   bind the same port.
 - `mod/run/` is gitignored, and the server run dir is `mod/run/server`, so it is ignored too.
 - **Git Bash rewrites arguments that start with a slash.** Run from Git Bash (MSYS),
-  `node tools/devcli.mjs type "/status"` types `C:/Program Files/Git/status`, and the console sends
+  `node tools/devbridge-cli.mjs type "/status"` types `C:/Program Files/Git/status`, and the console sends
   that as a new goal. Set `MSYS_NO_PATHCONV=1` for console commands, or drive the DevBridge from
   PowerShell. This happened in the claude e2e run. The lead asked what the goal meant instead of
   starting work on it.

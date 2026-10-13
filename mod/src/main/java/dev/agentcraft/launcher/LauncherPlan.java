@@ -22,7 +22,7 @@ import org.jspecify.annotations.Nullable;
  * which checkout the Foreman runs from, whether a Foreman already on the port is reused, restarted or left alone, the
  * command line, and the environment. The client's {@code Launcher} does the I/O around them.
  *
- * <p>The rules match tools/launch.ps1 and tools/unix.mjs where they overlap: a Foreman is stale when it runs from
+ * <p>The rules match tools/launch.ps1 and tools/launch-unix.mjs where they overlap: a Foreman is stale when it runs from
  * another checkout or another commit than the one it would be started from now.
  */
 public final class LauncherPlan {
@@ -435,7 +435,7 @@ public final class LauncherPlan {
 	public enum Owner {
 		/** The process our record names (same pid, same start time). */
 		OURS,
-		/** Not started by this launcher (tools/launch.ps1, tools/unix.mjs, a terminal), or unknown. */
+		/** Not started by this launcher (tools/launch.ps1, tools/launch-unix.mjs, a terminal), or unknown. */
 		FOREIGN
 	}
 
