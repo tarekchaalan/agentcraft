@@ -709,10 +709,14 @@ export class TeamBackend implements Backend {
 
   /** What the AgentCraft policy needs to judge this agent's tool calls. */
   private policyContext(agentId: string, role: Role, cwd: string): PolicyContext {
+    // what the agent's engine enabled on top (Claude: claude.context skills, their files and MCP
+    // tools), so the policy, and auto mode's guardrail hook through `classify`, both see it
+    const engineCtx = this.engineFor(agentId).policyContext?.();
     return {
+      ...engineCtx,
       role,
       cwd,
-      readDirs: [this.fm.memory.dir],
+      readDirs: [this.fm.memory.dir, ...(engineCtx?.readDirs ?? [])],
       alwaysAllow: this.fm.store.data.permissionRules[agentId] ?? [],
       mcpServer: TEAM_MCP_SERVER,
       leadReadCommands: this.cfg.leadReadCommands,

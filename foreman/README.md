@@ -132,6 +132,33 @@ most ~100 ms of state, and interrupted agent turns resume on the next start.
   listed: names under `~/.claude/agents` or paths). Their tool calls go through the same policy and
   guardrails; they never get a worktree of their own. A `permissionMode` in an agent file is ignored.
 
+### Agent context (`claude.context`)
+
+Claude agents run with Claude Code's own settings off (`settingSources: []`): settings-file allow
+rules and repo hooks would run ahead of, or outside, the permission policy. What they do get is set
+here (the Claude engine adds it; Codex agents in a mixed team are not affected):
+
+```json
+{ "claude": { "context": {
+    "repoInstructions": true,
+    "userInstructions": false,
+    "files": ["~/.codex/AGENTS.md"],
+    "maxChars": 24000,
+    "skills": ["roadmap-keeper", "~/somewhere/my-skill"],
+    "mcpServers": { "xcode": { "command": "xcodebuildmcp", "args": ["mcp"] } },
+    "mcpAllow": ["mcp__xcode__list_sims"] } } }
+```
+
+- **Instructions:** the repository's `CLAUDE.md`, `.claude/CLAUDE.md` and `AGENTS.md` (on by default;
+  workers read them from their worktree, so committed versions), your `~/.claude/CLAUDE.md` (off by
+  default), and any `files`. `@path` imports are expanded. They are appended after the role prompt,
+  which wins where they conflict.
+- **Skills:** names under `~/.claude/skills` or paths. They are copied into `<profile>/agent-plugin`
+  with `allowed-tools` removed from `SKILL.md` (it would pre-approve tools), and only these can be
+  loaded with the Skill tool. Everything a skill then does goes through the normal permission checks.
+- **MCP servers:** given to every agent. Their tools ask for permission unless listed in `mcpAllow`
+  (exact names or `mcp__server__*`). The `agentcraft` server name is reserved.
+
 While running, `<home>/<profile>/foreman.json` records `{pid, port, host, backend, profile, version, startedAt}`
 so launch scripts can find it; `<home>/foreman.json` holds the same for the first live Foreman (when
 it exits, another live profile takes its place). A second Foreman on a profile that is already

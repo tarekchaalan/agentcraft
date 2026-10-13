@@ -3,7 +3,7 @@
 // merges, steering, restarts - is the team's (team.ts) and the same for every engine, so a team
 // can mix them (e.g. a Claude lead with Codex workers).
 import type { ChildProcess } from 'node:child_process';
-import type { Verdict } from '../policy.js';
+import type { PolicyContext, Verdict } from '../policy.js';
 import type { Usage } from '../protocol.js';
 import type { AgentTool, TurnHandle } from './tools.js';
 
@@ -89,4 +89,9 @@ export interface Engine {
    * returned `error`.
    */
   usage?(): Promise<Usage>;
+  /**
+   * What the policy also needs to know for this engine's agents, merged into the team's policy
+   * context (Claude: the skills and MCP tools enabled in claude.context, and the skills' files).
+   */
+  policyContext?(): Pick<PolicyContext, 'readDirs' | 'skills' | 'mcpAllow'>;
 }

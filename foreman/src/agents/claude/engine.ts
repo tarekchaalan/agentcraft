@@ -1,13 +1,16 @@
 // The Claude engine: one Claude Agent SDK `query()` per turn. We spawn the CLI ourselves (same as
 // the SDK's local spawn) so its pid is known and a stopped turn's whole process tree can be ended.
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 import { query, type AgentDefinition, type CanUseTool, type Options, type Query } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeConfig } from '../../config.js';
 import type { Foreman } from '../../foreman.js';
 import type { Usage } from '../../protocol.js';
+import { userName } from '../../user.js';
 import { truncate } from '../../util/text.js';
 import type { AuthCheck, Engine, Role, TurnSpec, TurnStats } from '../engine.js';
 import { detectApiAuth, NO_API_AUTH_MESSAGE, withAuthMode } from './auth.js';
+import { buildSkillsPlugin, instructionsBlock } from './context.js';
 import { guardrailHook } from './permissions.js';
 import { StreamMapper } from './stream.js';
 import { loadSubagents } from './subagents.js';
@@ -26,6 +29,8 @@ export class ClaudeEngine implements Engine {
   private usageMissing = false;
   /** subagent definitions from claude.subagents.agents */
   private subagentDefs: Record<string, AgentDefinition> = {};
+  /** the Foreman's skills plugin (built from claude.context.skills when the engine is created) */
+  private skillsPlugin: { path: string; ids: string[] } | undefined;
 
   constructor(
     private fm: Foreman,
@@ -45,6 +50,7 @@ export class ClaudeEngine implements Engine {
         `${rules ? `, ${rules} rule(s)` : ''}${p.webTools ? ', web tools' : ''}` +
         `${s.enabled ? `, subagents${Object.keys(this.subagentDefs).length ? ` (${Object.keys(this.subagentDefs).join(', ')})` : ''}` : ''}`,
     );
+    this.prepareContext();
   }
 
   /**
@@ -58,6 +64,8 @@ export class ClaudeEngine implements Engine {
     const tools = spec.role === 'lead' ? ['Read', 'Grep', 'Glob', 'Bash'] : ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash', 'TodoWrite'];
     if (p.webTools) tools.push('WebFetch', 'WebSearch');
     if (sub) tools.push('Agent', 'Task');
+    // claude.context skills: only the Foreman's plugin, only the skills enabled there
+    if (this.skillsPlugin) tools.push('Skill');
     // no allowedTools: every tool call (incl. our MCP tools) goes through canUseTool/policy
     const disallowed = ['Bash(git push:*)', ...(sub ? [] : ['Task', 'Agent']), ...(p.webTools ? [] : ['WebSearch', 'WebFetch'])];
     const rules = p.allow.length || p.deny.length || p.ask.length ? { permissions: { allow: p.allow, deny: p.deny, ask: p.ask } } : undefined;
@@ -69,6 +77,7 @@ export class ClaudeEngine implements Engine {
       disallowedTools: disallowed,
       ...(rules ? { settings: rules } : {}),
       ...(sub && Object.keys(this.subagentDefs).length ? { agents: this.subagentDefs } : {}),
+      ...(this.skillsPlugin ? { plugins: [{ type: 'local' as const, path: this.skillsPlugin.path, skipMcpDiscovery: true }], skills: this.skillsPlugin.ids } : {}),
       ...(p.mode === 'auto' && classify
         ? {
             hooks: {
@@ -87,6 +96,36 @@ export class ClaudeEngine implements Engine {
             },
           }
         : {}),
+    };
+  }
+
+  /** Build the skills plugin and report what context the agents get (claude.context). */
+  private prepareContext(): void {
+    const c = this.cfg.context;
+    const dir = path.join(this.fm.config.dataDir, 'agent-plugin');
+    try {
+      const { ids, problems } = buildSkillsPlugin(c.skills, dir);
+      for (const p of problems) this.fm.log.warn(`claude.context: ${p}`);
+      this.skillsPlugin = ids.length ? { path: dir, ids } : undefined;
+    } catch (e) {
+      this.fm.log.error(`claude.context: could not build the skills plugin: ${(e as Error).message}`);
+      this.skillsPlugin = undefined;
+    }
+    const what = [
+      c.repoInstructions ? 'repo CLAUDE.md/AGENTS.md' : '',
+      c.userInstructions ? '~/.claude/CLAUDE.md' : '',
+      c.files.length ? `${c.files.length} instruction file(s)` : '',
+      this.skillsPlugin ? `skills ${this.skillsPlugin.ids.map((i) => i.split(':')[1]).join(', ')}` : '',
+      Object.keys(c.mcpServers).length ? `MCP ${Object.keys(c.mcpServers).join(', ')}` : '',
+    ].filter(Boolean);
+    this.fm.log.info(`agent context: ${what.join('; ') || 'none'}`);
+  }
+
+  /** The enabled skills (and their copied files, readable) and the MCP tools allowed in config. */
+  policyContext(): { readDirs?: string[]; skills?: string[]; mcpAllow: string[] } {
+    return {
+      ...(this.skillsPlugin ? { readDirs: [this.skillsPlugin.path], skills: this.skillsPlugin.ids } : {}),
+      mcpAllow: this.cfg.context.mcpAllow,
     };
   }
 
@@ -188,15 +227,20 @@ export class ClaudeEngine implements Engine {
       const r = await spec.permission(toolName, input, opts.signal, opts.title);
       return r.allow ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: r.message, ...(r.interrupt ? { interrupt: true } : {}) };
     };
+    // claude.context: the instruction files the user chose, read by the Foreman (never through
+    // settingSources), after the role prompt, which takes precedence
+    const extra = instructionsBlock(this.cfg.context, cwd, userName());
     const options: Options = {
       cwd,
       model: this.model(role),
       effort: role === 'lead' ? this.cfg.leadEffort : this.cfg.effort,
       maxTurns: role === 'lead' ? this.cfg.maxTurnsLead : this.cfg.maxTurnsWorker,
       settingSources: [],
+      // permission mode, tools (incl. Skill), rules, subagents, skills plugin, guardrail hook
       ...this.permissionOptions(spec, canUseTool),
-      mcpServers: { [MCP_SERVER]: mcpServer(spec.tools) },
-      systemPrompt: { type: 'preset', preset: 'claude_code', append: spec.instructions },
+      // the user's extra servers first, so the team tools server can never be replaced
+      mcpServers: { ...this.cfg.context.mcpServers, [MCP_SERVER]: mcpServer(spec.tools) },
+      systemPrompt: { type: 'preset', preset: 'claude_code', append: extra ? `${spec.instructions}\n\n${extra}` : spec.instructions },
       abortController: abort,
       env: withAuthMode(spec.env, this.cfg.useClaudeLogin),
       spawnClaudeCodeProcess: (o) => {
