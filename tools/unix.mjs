@@ -210,7 +210,7 @@ async function launch(opt, summary) {
   fs.mkdirSync(logDir, { recursive: true });
   if (!opt['no-game']) javaHome();
   for (const repo of opt.repo) {
-    if (!fs.existsSync(path.join(repo, '.git'))) throw new Error(`not a Git repository root: ${repo}`);
+    if (!fs.existsSync(repo) || !fs.statSync(repo).isDirectory()) throw new Error(`not an existing folder: ${repo}`);
   }
   installDeps(tools);
   if (opt.backend === 'claude' && opt['use-claude-login'] && !opt['no-foreman'] && !claudeLoggedIn()) {

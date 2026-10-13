@@ -28,7 +28,8 @@
 .PARAMETER World
   studio or survival. Asked when not given.
 .PARAMETER Repo
-  Repository root(s) to register with the Foreman. Asked when not given (Enter = none).
+  Folder(s) for the agents to work in: a git repository, or any existing folder, even an empty one.
+  Asked when not given (Enter = none).
 .PARAMETER Backend
   claude (default), codex or sim. With claude and no login or key configured, you are asked.
 .PARAMETER UseClaudeLogin
@@ -699,20 +700,20 @@ function Resolve-Repos {
     if ($Repo) { $given = $Repo }
     foreach ($r in $given) {
         $full = [System.IO.Path]::GetFullPath($r)
-        if (-not (Test-Path -LiteralPath (Join-Path $full '.git'))) { Quit 1 "-Repo $full is not the root of a git repository" }
+        if (-not (Test-Path -LiteralPath $full -PathType Container)) { Quit 1 "-Repo $full is not an existing folder" }
         $out += $full
         Write-Ok "repo: $full"
     }
     if (@($out).Count -or -not $script:Interactive) { if (-not @($out).Count) { Write-Info 'no repo given; the agents start with the demo repo in sandbox/' }; return $out }
-    Write-Info 'The agents code in a git repository of yours (each task in its own worktree). Enter skips this and uses the demo repo in sandbox/.'
+    Write-Info 'The agents code in a folder of yours: a git repository (each task in its own worktree) or any other folder, even an empty one. Enter skips this and uses the demo repo in sandbox/.'
     while ($true) {
-        $p = Read-Text 'Path to a repository root (Enter = none)'
+        $p = Read-Text 'Path to the project folder (Enter = none)'
         if (-not $p) { return $out }
         try { $full = (Resolve-Path -LiteralPath $p -ErrorAction Stop).Path } catch { Write-Warn2 "not found: $p"; continue }
-        if (-not (Test-Path -LiteralPath (Join-Path $full '.git'))) { Write-Warn2 "$full has no .git folder; give the repository root"; continue }
+        if (-not (Test-Path -LiteralPath $full -PathType Container)) { Write-Warn2 "$full is not a folder"; continue }
         $out += $full
         Write-Ok "repo: $full"
-        $more = Read-Choice 'Add another repository?' @(@{ key = 'n'; label = 'no' }, @{ key = 'y'; label = 'yes' })
+        $more = Read-Choice 'Add another folder?' @(@{ key = 'n'; label = 'no' }, @{ key = 'y'; label = 'yes' })
         if ($more -ne 'y') { return $out }
     }
 }

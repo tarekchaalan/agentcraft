@@ -5,7 +5,7 @@
 //   node tools/foremancli.mjs wait [--timeout SECONDS]           wait until the Foreman answers
 //   node tools/foremancli.mjs diff <repoId> <worktree>           structured diff stats (diff.request)
 //   node tools/foremancli.mjs diff --decision d3                 the diff of a merge decision
-//   node tools/foremancli.mjs repo-add <path>                    register a repo (repo.add)
+//   node tools/foremancli.mjs repo-add <path>                    register a project folder (repo.add)
 //   node tools/foremancli.mjs send <type> '<json payload>'       any client message; prints the ack
 //   node tools/foremancli.mjs send user.message to=kit "text=hello there"   (same, key=value form)
 //

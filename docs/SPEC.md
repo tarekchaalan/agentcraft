@@ -93,8 +93,9 @@ served **by the mod client**:
 
 ## Practicality requirements (non-negotiable)
 
-1. **Real repos**: `repo.add` any local git repo. Each worker agent gets its own git worktree on
-   branch `agentcraft/<agent>/<task>`. **Never push, never touch the user's checked-out branch,
+1. **Real projects**: `repo.add` any existing local folder: a git repo with commits, or a plain folder
+   (empty, not git, git without commits; see foreman/README.md, "Folder mode"). Each worker agent gets
+   its own git worktree on branch `agentcraft/<agent>/<task>` (in a plain folder: of a private repo). **Never push, never touch the user's checked-out branch,
    never merge without an explicit user `merge` decision.**
 2. **Command console** (keybind `` ` `` or `Enter` on a terminal block): one input line with
    prefixes — plain text = new goal; `@name msg` = message agent; `/answer`, `/repo add <path>`,

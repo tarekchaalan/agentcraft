@@ -557,7 +557,7 @@ export class Foreman {
   async submitGoal(text: string, repoId?: string): Promise<Goal> {
     const repo = repoId ? this.repos.get(repoId) : this.repos.defaultRepo();
     if (repoId && !repo) throw new ClientError(`no repo "${repoId}"`);
-    if (!repo) throw new ClientError('no repo connected yet — add one with /repo add <path>');
+    if (!repo) throw new ClientError('no project folder connected yet — add one with /repo add <path> (any existing folder works, empty or not, git or not)');
     if (!this.backend) throw new ClientError('no backend running');
     const goal = this.createGoal(text, repo.id);
     await this.backend.submitGoal(goal);
@@ -639,7 +639,7 @@ export class Foreman {
     for (const p of this.config.repos) {
       try {
         const r = await this.repos.add(p);
-        this.log.info(`repo ${r.id}: ${r.path} (${r.branch})`);
+        this.log.info(`repo ${r.id}: ${r.path} (${this.repos.isFolder(r) ? 'plain folder' : r.branch})`);
       } catch (e) {
         this.log.error(`could not add repo ${p}: ${(e as Error).message}`);
       }

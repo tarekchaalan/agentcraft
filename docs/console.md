@@ -32,7 +32,7 @@ back the next time it opens (this session), and the console terminal shows it on
 | plain text | `goal.submit` (with several repos you pick one first: 1-9 / arrows, Enter) |
 | `@juniper text`, `@all text` | `user.message` |
 | `/answer [d4] <n\|option> [text]` | `decision.answer`; `n` is the 1-based button number; the id can be left out when one decision is open; free text for questions; `Request changes` needs the feedback text |
-| `/repo add <path>`, `/repos` | `repo.add`, list repos |
+| `/repo add <path>`, `/repos` | `repo.add` (any existing folder, git or not), list repos |
 | `/pause @x`, `/resume @x`, `/stop @x` (also `all`), `/spawn @x [task]` | `agent.action` |
 | `/task <id> cancel\|retry\|prioritize [n]\|reassign @x` | `task.action` |
 | `/diff [worktree\|@agent\|task]` | opens the diff screen (`diff`, owned by the diff feature); without one, prints a file summary from `diff.request` |

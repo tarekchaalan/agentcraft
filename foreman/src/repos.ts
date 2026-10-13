@@ -1,6 +1,18 @@
-// RepoManager: registered local git repos, per-worker worktrees, structured diffs, guarded merges.
+// RepoManager: registered project folders, per-worker worktrees, structured diffs, guarded merges.
 //
-// Safety contract
+// Two modes (Repo.mode)
+//  - "git" (default): the folder is a git repository with at least one commit. Agents branch from
+//    its current branch and an approved merge becomes a commit on that branch.
+//  - "folder": the folder is anything else: empty, not a repository, a folder inside someone else's
+//    repository, or a repository that has no commits yet. The folder gets NO `.git`, and no repository
+//    that contains it is touched. The Foreman keeps a private git repository for it under
+//    <profile>/shadow/<id>.git whose work tree is the folder (GIT_DIR + GIT_WORK_TREE, never
+//    written into any config). Its "main" branch holds snapshots of the folder: before agents branch
+//    off, and before a merge, the folder's current files (your edits included) are committed there.
+//    Everything below then works as in git mode, with the folder as the base checkout; an approved
+//    merge fast-forwards that branch, which writes the files into the folder.
+//
+// Safety contract (both modes)
 //  - never pushes (there is no code path that runs `git push`)
 //  - worktrees live under <profile>/worktrees, on branches agentcraft/<agent>/<task-slug>
 //  - the user's checkout is only ever modified by merge(), which requires an answered `merge`
@@ -17,17 +29,17 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Ctx } from './context.js';
 import { parseUnifiedDiff, type ParsedDiff } from './diff.js';
-import type { CiStatus, Decision, Repo, Worktree } from './protocol.js';
+import type { CiStatus, Decision, Repo, RepoMode, Worktree } from './protocol.js';
 import { withGitSafety } from './gitsafety.js';
 import { ensureDir, isInsideOrEqual } from './util/fsx.js';
-import { agentGitIdentity, git, gitConfigGet, gitOut, identityEnv, listWorktrees } from './util/git.js';
+import { agentGitIdentity, git, gitConfigGet, gitOut, identityEnv, listWorktrees, type GitOptions } from './util/git.js';
 import { runShell } from './util/proc.js';
 import { slugify, tailLines } from './util/text.js';
 
 export class RepoError extends Error {
   constructor(
     message: string,
-    readonly code: 'not_found' | 'not_git' | 'no_commits' | 'refused' | 'conflict' | 'dirty' | 'empty' | 'failed' = 'failed',
+    readonly code: 'not_found' | 'refused' | 'conflict' | 'dirty' | 'empty' | 'failed' = 'failed',
     /** code 'conflict': the files that would conflict */
     readonly files: string[] = [],
   ) {
@@ -123,6 +135,37 @@ function samePath(a: string, b: string): boolean {
   return n(a) === n(b);
 }
 
+/** Folder mode: names never snapshotted (dependency and cache folders). A .gitignore in the folder is honoured too. */
+export const FOLDER_DEFAULT_EXCLUDES = ['node_modules/', '.venv/', 'venv/', '__pycache__/', '*.pyc', '.DS_Store', 'Thumbs.db'];
+/** Folder mode: a folder with more files than this is refused (a home directory or a drive is not a project). */
+export const FOLDER_FILE_CAP = 20_000;
+const FOLDER_SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__']);
+
+/** Count files under `dir` (links are not followed), skipping dependency folders, stopping once `cap` is passed. */
+export function countFolderFiles(dir: string, cap: number): number {
+  let n = 0;
+  const stack = [dir];
+  while (stack.length && n <= cap) {
+    const cur = stack.pop()!;
+    let d: fs.Dir;
+    try {
+      d = fs.opendirSync(cur);
+    } catch {
+      continue; // unreadable: the snapshot will report it
+    }
+    try {
+      for (let e = d.readSync(); e && n <= cap; e = d.readSync()) {
+        if (e.isDirectory()) {
+          if (!FOLDER_SKIP_DIRS.has(e.name)) stack.push(path.join(cur, e.name));
+        } else n++;
+      }
+    } finally {
+      d.closeSync();
+    }
+  }
+  return n;
+}
+
 export interface RepoOptions {
   /** merge: a merge commit that keeps the agents' commits; squash: one commit with the changes */
   mergeStyle?: 'merge' | 'squash';
@@ -140,6 +183,8 @@ async function userIdentity(repoPath: string): Promise<{ env: NodeJS.ProcessEnv;
 
 export class RepoManager {
   readonly worktreeRoot: string;
+  /** folder mode: the private git repositories (<id>.git) live here, next to the worktrees */
+  readonly shadowRoot: string;
   private refreshTimers = new Map<string, NodeJS.Timeout>();
   /** per-repo queue: merges / worktree add+remove never run concurrently on one repo */
   private locks = new Map<string, Promise<unknown>>();
@@ -150,6 +195,68 @@ export class RepoManager {
     private opts: RepoOptions = {},
   ) {
     this.worktreeRoot = ensureDir(worktreeRoot);
+    this.shadowRoot = path.join(path.dirname(path.resolve(worktreeRoot)), 'shadow');
+  }
+
+  // ---- folder mode plumbing -----------------------------------------------------------------
+
+  isFolder(r: Repo): boolean {
+    return r.mode === 'folder';
+  }
+
+  shadowDir(r: Repo): string {
+    return path.join(this.shadowRoot, `${r.id}.git`);
+  }
+
+  /** git env that makes a command at `r.path` use the private repository (folder mode), else nothing */
+  private gitEnv(r: Repo): NodeJS.ProcessEnv {
+    return this.isFolder(r) ? { GIT_DIR: this.shadowDir(r), GIT_WORK_TREE: r.path } : {};
+  }
+
+  /** git at the repo's base checkout (the user's repository, or the folder with its private repository) */
+  private g(r: Repo, args: string[], opts: GitOptions = {}) {
+    return git(r.path, args, { ...opts, env: { ...this.gitEnv(r), ...opts.env } });
+  }
+
+  private async go(r: Repo, args: string[], opts: GitOptions = {}): Promise<string> {
+    return (await this.g(r, args, opts)).stdout.trim();
+  }
+
+  /**
+   * Create the private repository of a folder (once): empty "main", default excludes, no remotes.
+   * Line endings pass through unchanged (core.autocrlf false in the private repository's own config,
+   * which its worktrees share): a plain folder has no git settings of its own, so Git for Windows'
+   * system-wide autocrlf=true must not turn the files agents write into CRLF in your folder.
+   */
+  private async initShadow(r: Repo): Promise<void> {
+    const dir = this.shadowDir(r);
+    if (!fs.existsSync(path.join(dir, 'HEAD'))) {
+      ensureDir(this.shadowRoot);
+      await git(this.shadowRoot, ['init', '-q', '--bare', dir]);
+      await git(dir, ['symbolic-ref', 'HEAD', `refs/heads/${r.branch}`]);
+      await git(dir, ['config', 'core.bare', 'false']);
+      const exclude = path.join(dir, 'info', 'exclude');
+      ensureDir(path.dirname(exclude));
+      fs.writeFileSync(exclude, `# AgentCraft: never snapshotted (a .gitignore in the folder is honoured too)\n${FOLDER_DEFAULT_EXCLUDES.join('\n')}\n`);
+    }
+    // also for private repositories made before this setting existed
+    if ((await git(dir, ['config', '--local', '--get', 'core.autocrlf'], { allowFail: true })).stdout.trim() !== 'false') {
+      await git(dir, ['config', 'core.autocrlf', 'false']);
+    }
+  }
+
+  /**
+   * Folder mode: commit the folder's current files on the base branch, so agents start from what is
+   * there now and a merge is made against what is there now (a file you edited since is part of the
+   * base, not overwritten). No-op for git mode. Returns true if a commit was made.
+   */
+  private async snapshot(r: Repo, opts: { allowEmpty?: boolean } = {}): Promise<boolean> {
+    if (!this.isFolder(r)) return false;
+    await this.g(r, ['add', '-A', '--', '.'], { timeoutMs: 300_000 });
+    const clean = (await this.g(r, ['diff', '--cached', '--quiet'], { allowFail: true })).code === 0;
+    if (clean && !opts.allowEmpty) return false;
+    await this.g(r, ['commit', '-q', '--no-verify', ...(opts.allowEmpty ? ['--allow-empty'] : []), '-m', `Snapshot of ${r.name}`], { env: agentIdentity('user') });
+    return true;
   }
 
   private serial<T>(repoId: string, fn: () => Promise<T>): Promise<T> {
@@ -203,37 +310,55 @@ export class RepoManager {
     return w;
   }
 
-  /** Register a local git repo (idempotent by path). */
+  /**
+   * Register a local folder (idempotent by path). A git repository root with commits is used as it
+   * is (mode "git"). Any other existing folder is a project folder (mode "folder"): see the header.
+   */
   async add(p: string): Promise<Repo> {
     const abs = path.resolve(p.replace(/^~(?=$|[\\/])/, os.homedir()));
     if (!fs.existsSync(abs)) throw new RepoError(`path does not exist: ${abs}`, 'not_found');
-    const top = await git(abs, ['rev-parse', '--show-toplevel'], { allowFail: true });
-    if (top.code !== 0) throw new RepoError(`not a git repository: ${abs}`, 'not_git');
-    const root = path.resolve(top.stdout.trim());
-    // a folder inside some other repository is not that repository: registering the enclosing
-    // repo silently would make it the merge target (e.g. a new folder under a project)
-    const real = (p: string) => {
-      try {
-        return path.resolve(fs.realpathSync.native(p)).toLowerCase();
-      } catch {
-        return path.resolve(p).toLowerCase();
-      }
-    };
-    if (real(abs) !== real(root)) {
-      throw new RepoError(`${abs} is not a repository root: it is inside the git repository ${root}. Add the repository itself (/repo add ${root}) or run \`git init\` in ${abs} first.`, 'not_git');
-    }
-    const existing = this.repos.find((r) => path.resolve(r.path).toLowerCase() === root.toLowerCase());
+    if (!fs.statSync(abs).isDirectory()) throw new RepoError(`not a folder: ${abs}`, 'refused');
+    const existing = this.repos.find((r) => samePath(r.path, abs));
     if (existing) {
+      if (this.isFolder(existing)) await this.initShadow(existing);
       await this.refresh(existing.id);
       return existing;
     }
-    const head = await git(root, ['rev-parse', '--verify', 'HEAD'], { allowFail: true });
-    if (head.code !== 0) throw new RepoError(`repository has no commits yet: ${root}`, 'no_commits');
-    const branch = (await git(root, ['symbolic-ref', '--quiet', '--short', 'HEAD'], { allowFail: true })).stdout.trim();
-    if (!branch) throw new RepoError(`repository is in detached HEAD state; check out a branch first: ${root}`, 'refused');
-    let id = slugify(path.basename(root), 24);
-    for (let i = 2; this.get(id); i++) id = `${slugify(path.basename(root), 20)}-${i}`;
-    const repo: Repo = { id, name: path.basename(root), path: root, branch, dirty: false, worktrees: [], ci: 'unknown' };
+    let mode: RepoMode = 'folder';
+    let branch = 'main';
+    let why = 'it is not a git repository';
+    const top = await git(abs, ['rev-parse', '--show-toplevel'], { allowFail: true });
+    if (top.code === 0) {
+      const root = path.resolve(top.stdout.trim());
+      if (!samePath(abs, root)) {
+        // a folder inside some other repository is a folder of its own: that repository is not touched
+        why = `it is inside the git repository ${root}, which AgentCraft does not touch`;
+      } else if ((await git(abs, ['rev-parse', '--verify', 'HEAD'], { allowFail: true })).code !== 0) {
+        why = 'its git repository has no commits yet, and AgentCraft makes none for you';
+      } else {
+        const current = (await git(abs, ['symbolic-ref', '--quiet', '--short', 'HEAD'], { allowFail: true })).stdout.trim();
+        if (!current) throw new RepoError(`repository is in detached HEAD state; check out a branch first: ${abs}`, 'refused');
+        mode = 'git';
+        branch = current;
+      }
+    }
+    if (mode === 'folder') {
+      if (samePath(abs, os.homedir()) || path.parse(abs).root === abs) {
+        throw new RepoError(`${abs} is your home directory or a drive root, not a project folder: pick a folder inside it`, 'refused');
+      }
+      const n = countFolderFiles(abs, FOLDER_FILE_CAP);
+      if (n > FOLDER_FILE_CAP) {
+        throw new RepoError(`${abs} holds more than ${FOLDER_FILE_CAP} files: pick the project's own folder (dependency folders like node_modules are not counted)`, 'refused');
+      }
+    }
+    let id = slugify(path.basename(abs), 24) || 'project';
+    for (let i = 2; this.get(id); i++) id = `${slugify(path.basename(abs), 20) || 'project'}-${i}`;
+    const repo: Repo = { id, name: path.basename(abs), mode, path: abs, branch, dirty: false, worktrees: [], ci: 'unknown' };
+    if (mode === 'folder') {
+      await this.initShadow(repo);
+      await this.snapshot(repo, { allowEmpty: true });
+      this.ctx.log.info(`repo ${id}: ${abs} is used as a plain folder (${why}): approved work is written into it as files, no commits`);
+    }
     this.repos.push(repo);
     await this.refresh(id);
     return repo;
@@ -254,9 +379,9 @@ export class RepoManager {
   /** Update head/dirty and worktree stats, then broadcast. */
   async refresh(repoId: string): Promise<Repo> {
     const r = this.require(repoId);
-    const h = await git(r.path, ['rev-parse', '--short', `refs/heads/${r.branch}`], { allowFail: true });
+    const h = await this.g(r, ['rev-parse', '--short', `refs/heads/${r.branch}`], { allowFail: true });
     if (h.code === 0) r.head = h.stdout.trim();
-    r.dirty = await this.isDirty(r.path);
+    r.dirty = await this.checkoutDirty(r);
     for (const w of r.worktrees) {
       if (w.status !== 'active') continue;
       try {
@@ -276,9 +401,9 @@ export class RepoManager {
   async pollStatus(repoId: string): Promise<boolean> {
     const r = this.get(repoId);
     if (!r || !fs.existsSync(r.path)) return false;
-    const h = await git(r.path, ['rev-parse', '--short', `refs/heads/${r.branch}`], { allowFail: true });
+    const h = await this.g(r, ['rev-parse', '--short', `refs/heads/${r.branch}`], { allowFail: true });
     const head = h.code === 0 ? h.stdout.trim() : r.head;
-    const dirty = await this.isDirty(r.path);
+    const dirty = await this.checkoutDirty(r);
     if (head === r.head && dirty === r.dirty) return false;
     if (head) r.head = head;
     r.dirty = dirty;
@@ -321,6 +446,15 @@ export class RepoManager {
     return s.code !== 0 || s.stdout.trim().length > 0;
   }
 
+  /**
+   * Does the base checkout block a merge? Git mode: it has uncommitted tracked changes. Folder mode:
+   * never, because a merge first absorbs your edits into a snapshot (and git itself refuses to
+   * overwrite a file you changed in the meantime).
+   */
+  private async checkoutDirty(r: Repo): Promise<boolean> {
+    return this.isFolder(r) ? false : this.isDirty(r.path);
+  }
+
   branchName(agentId: string, taskId: string, title: string): string {
     return `${BRANCH_PREFIX}${agentId}/${taskId}-${branchSlug(title)}`;
   }
@@ -343,11 +477,13 @@ export class RepoManager {
     const id = `${agentId}-${task.id}`;
     const existing = r.worktrees.find((w) => w.id === id);
     if (existing && existing.status === 'active' && fs.existsSync(existing.path)) return existing;
+    // folder mode: the agent starts from the folder as it is now
+    await this.snapshot(r);
     let branch = existing?.branch ?? this.branchName(agentId, task.id, task.title);
     let wtPath = path.join(this.worktreeRoot, r.id, id);
     ensureDir(path.dirname(wtPath));
-    await git(r.path, ['worktree', 'prune'], { allowFail: true });
-    const known = async (p: string) => (await listWorktrees(r.path)).some((e) => path.resolve(e.path).toLowerCase() === path.resolve(p).toLowerCase());
+    await this.g(r, ['worktree', 'prune'], { allowFail: true });
+    const known = async (p: string) => (await listWorktrees(r.path, { env: this.gitEnv(r) })).some((e) => path.resolve(e.path).toLowerCase() === path.resolve(p).toLowerCase());
     if (fs.existsSync(wtPath) && !(await known(wtPath))) {
       // stale directory (crash, or still busy when it was abandoned): remove it, or if something
       // still holds it, use a fresh directory next to it
@@ -361,12 +497,12 @@ export class RepoManager {
       }
     }
     if (!fs.existsSync(wtPath)) {
-      const exists = async (b: string) => (await git(r.path, ['rev-parse', '--verify', '--quiet', `refs/heads/${b}`], { allowFail: true })).code === 0;
+      const exists = async (b: string) => (await this.g(r, ['rev-parse', '--verify', '--quiet', `refs/heads/${b}`], { allowFail: true })).code === 0;
       let branchExists = await exists(branch);
       if (startPoint && branchExists && branch !== startPoint) {
-        const ancestor = (await git(r.path, ['merge-base', '--is-ancestor', `refs/heads/${branch}`, startPoint], { allowFail: true })).code === 0;
+        const ancestor = (await this.g(r, ['merge-base', '--is-ancestor', `refs/heads/${branch}`, startPoint], { allowFail: true })).code === 0;
         if (ancestor) {
-          await git(r.path, ['branch', '-f', branch, startPoint]); // fast-forward only: nothing is lost
+          await this.g(r, ['branch', '-f', branch, startPoint]); // fast-forward only: nothing is lost
         } else {
           let n = 2;
           while (await exists(`${branch}-${n}`)) if (++n > 50) throw new RepoError(`no free branch name for ${branch}`);
@@ -377,8 +513,8 @@ export class RepoManager {
       // agent worktrees hold the repository's bytes as committed (no CRLF conversion), so agents,
       // their edits and the Foreman's diffs all see the same content
       const lf = ['-c', 'core.autocrlf=false'];
-      if (branchExists) await git(r.path, [...lf, 'worktree', 'add', wtPath, branch]);
-      else await git(r.path, [...lf, 'worktree', 'add', '-b', branch, wtPath, startPoint ?? r.branch]);
+      if (branchExists) await this.g(r, [...lf, 'worktree', 'add', wtPath, branch]);
+      else await this.g(r, [...lf, 'worktree', 'add', '-b', branch, wtPath, startPoint ?? r.branch]);
     }
     const w: Worktree = {
       id,
@@ -451,8 +587,8 @@ export class RepoManager {
       text = await this.rawWorkingDiff(r, w, []);
     } else {
       const meta = this.ctx.store.data.worktreeMeta[`${r.id}/${w.id}`];
-      const from = meta?.mergedBaseSha ?? (await gitOut(r.path, ['merge-base', w.base, w.branch]));
-      text = (await git(r.path, ['diff', '-M', '--no-ext-diff', '--unified=3', from, w.branch])).stdout;
+      const from = meta?.mergedBaseSha ?? (await this.go(r, ['merge-base', w.base, w.branch]));
+      text = (await this.g(r, ['diff', '-M', '--no-ext-diff', '--unified=3', from, w.branch])).stdout;
     }
     const parsed = parseUnifiedDiff(text);
     return { ...parsed, repoId: r.id, worktree: w.id, base: w.base, branch: w.branch };
@@ -469,7 +605,7 @@ export class RepoManager {
     const res = await git(w.path, ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--show-toplevel'], { allowFail: true });
     if (res.code !== 0) return { ok: false, reason: `git finds no repository at ${w.path} (its .git link is missing or broken)` };
     const [gitDir = '', commonDir = '', top = ''] = res.stdout.trim().split(/\r?\n/);
-    const repoCommon = (await git(r.path, ['rev-parse', '--path-format=absolute', '--git-common-dir'], { allowFail: true })).stdout.trim();
+    const repoCommon = (await this.g(r, ['rev-parse', '--path-format=absolute', '--git-common-dir'], { allowFail: true })).stdout.trim();
     if (!samePath(top, w.path)) return { ok: false, reason: `git in ${w.path} works on ${top} instead (its .git link was removed or changed)` };
     if (!repoCommon || !samePath(commonDir, repoCommon)) return { ok: false, reason: `${w.path} now belongs to another repository (${commonDir})` };
     if (samePath(gitDir, commonDir) || !isInsideOrEqual(realPath(gitDir), realPath(path.join(repoCommon, 'worktrees')))) {
@@ -529,7 +665,9 @@ export class RepoManager {
 
   /** Where (if anywhere) a branch is checked out. */
   private async checkoutOf(r: Repo, branch: string): Promise<string | undefined> {
-    const list = await listWorktrees(r.path);
+    // folder mode: the base branch is "checked out" in the folder itself (git lists its private repository instead)
+    if (this.isFolder(r) && branch === r.branch) return r.path;
+    const list = await listWorktrees(r.path, { env: this.gitEnv(r) });
     return list.find((e) => e.branch === branch)?.path;
   }
 
@@ -539,10 +677,10 @@ export class RepoManager {
     const w = this.requireWorktree(repoId, worktreeId);
     if (w.status !== 'active') return { ok: false, reason: `worktree ${w.id} is ${w.status}`, code: 'refused' };
     const target = await this.checkoutOf(r, w.base);
-    if (target && (await this.isDirty(target))) {
+    if (target && (this.isFolder(r) && target === r.path ? await this.checkoutDirty(r) : await this.isDirty(target))) {
       return { ok: false, reason: `the checkout at ${target} (${w.base}) has uncommitted changes — commit or stash them, then approve again`, code: 'dirty' };
     }
-    const mt = await git(r.path, ['merge-tree', '--write-tree', '--name-only', '--no-messages', w.base, w.branch], { allowFail: true });
+    const mt = await this.g(r, ['merge-tree', '--write-tree', '--name-only', '--no-messages', w.base, w.branch], { allowFail: true });
     if (mt.code === 1) {
       const files = mt.stdout.trim().split('\n').slice(1).filter(Boolean);
       return { ok: false, reason: `merge would conflict in: ${files.join(', ') || '(unknown files)'}`, code: 'conflict', files };
@@ -573,7 +711,9 @@ export class RepoManager {
 
     // 1. make sure the agent's work is committed on its branch
     await this.commitAll(r.id, w.id, commitMessage ?? `agentcraft: ${w.taskId ?? w.id}`);
-    const ahead = Number(await gitOut(r.path, ['rev-list', '--count', `${w.base}..${w.branch}`]));
+    // folder mode: edits you made in the folder since the agent branched become part of the base
+    await this.snapshot(r);
+    const ahead = Number(await this.go(r, ['rev-list', '--count', `${w.base}..${w.branch}`]));
     if (!ahead) throw new RepoError(`${w.branch} has no changes to merge`, 'empty');
 
     // 2. safety checks: conflicts + dirty target checkout
@@ -582,20 +722,22 @@ export class RepoManager {
 
     // 3. build the merge commit off-tree, as the user (they approved it): their git identity, and
     //    signed if his git config signs commits (commit-tree ignores commit.gpgsign by itself)
-    const baseSha = await gitOut(r.path, ['rev-parse', `refs/heads/${w.base}`]);
-    const branchSha = await gitOut(r.path, ['rev-parse', `refs/heads/${w.branch}`]);
-    const tree = (await gitOut(r.path, ['merge-tree', '--write-tree', '--no-messages', w.base, w.branch])).split('\n')[0]!.trim();
+    const baseSha = await this.go(r, ['rev-parse', `refs/heads/${w.base}`]);
+    const branchSha = await this.go(r, ['rev-parse', `refs/heads/${w.branch}`]);
+    const tree = (await this.go(r, ['merge-tree', '--write-tree', '--no-messages', w.base, w.branch])).split('\n')[0]!.trim();
     const approved = `Approved in AgentCraft (decision ${decision.id}${w.taskId ? `, task ${w.taskId}` : ''}).`;
     const squash = this.opts.mergeStyle === 'squash';
     let msg: string;
     if (squash) {
-      const authors = [...new Set((await gitOut(r.path, ['log', '--format=%an <%ae>', `${baseSha}..${branchSha}`])).split('\n').filter(Boolean))];
+      const authors = [...new Set((await this.go(r, ['log', '--format=%an <%ae>', `${baseSha}..${branchSha}`])).split('\n').filter(Boolean))];
       msg = `${(commitMessage ?? `agentcraft: ${w.taskId ?? w.id}`).trim()}\n\nSquashed from ${w.branch}. ${approved}${authors.length ? `\n\n${authors.map((a) => `Co-authored-by: ${a}`).join('\n')}` : ''}`;
     } else msg = `Merge ${w.branch} into ${w.base}\n\n${approved}`;
-    const sign = !!this.opts.signMerges && (await gitConfigGet(r.path, 'commit.gpgsign', 'bool')) === 'true';
-    const { env } = await userIdentity(r.path);
+    // folder mode: the commit lives in the Foreman's private repository, so it is neither yours nor signed
+    const folder = this.isFolder(r);
+    const sign = !folder && !!this.opts.signMerges && (await gitConfigGet(r.path, 'commit.gpgsign', 'bool')) === 'true';
+    const { env } = folder ? { env: agentIdentity('user') } : await userIdentity(r.path);
     const parents = squash ? ['-p', baseSha] : ['-p', baseSha, '-p', branchSha];
-    const ct = await git(r.path, ['commit-tree', ...(sign ? ['-S'] : []), tree, ...parents, '-m', msg], { env, allowFail: true, timeoutMs: 120_000 });
+    const ct = await this.g(r, ['commit-tree', ...(sign ? ['-S'] : []), tree, ...parents, '-m', msg], { env, allowFail: true, timeoutMs: 120_000 });
     if (ct.code !== 0) {
       const why = (ct.stderr || ct.stdout).trim().split('\n').slice(-2).join(' ');
       throw new RepoError(sign ? `signing the merge commit failed (your git config has commit.gpgsign=true): ${why}` : `could not create the merge commit: ${why}`, 'failed');
@@ -605,18 +747,18 @@ export class RepoManager {
     // 4. apply: fast-forward the checkout that has base checked out, or move the ref if none does
     const target = await this.checkoutOf(r, w.base);
     if (target) {
-      const ff = await git(target, ['merge', '--ff-only', '-q', mergeSha], { allowFail: true });
+      const ff = await git(target, ['merge', '--ff-only', '-q', mergeSha], { env: target === r.path ? this.gitEnv(r) : {}, allowFail: true });
       if (ff.code !== 0) {
         throw new RepoError(`could not update ${target}: ${(ff.stderr || ff.stdout).trim().split('\n').slice(-2).join(' ')}`, 'refused');
       }
     } else {
-      await git(r.path, ['update-ref', `refs/heads/${w.base}`, mergeSha, baseSha]);
+      await this.g(r, ['update-ref', `refs/heads/${w.base}`, mergeSha, baseSha]);
     }
 
     // 5. bookkeeping: keep the branch (no data loss); remove the worktree directory
-    const files = Number((await gitOut(r.path, ['diff', '--name-only', baseSha, mergeSha])).split('\n').filter(Boolean).length);
+    const files = Number((await this.go(r, ['diff', '--name-only', baseSha, mergeSha])).split('\n').filter(Boolean).length);
     // fork point of the branch, so the merged diff shows exactly the branch's own changes
-    const forkPoint = await gitOut(r.path, ['merge-base', baseSha, branchSha]);
+    const forkPoint = await this.go(r, ['merge-base', baseSha, branchSha]);
     this.ctx.store.data.worktreeMeta[`${r.id}/${w.id}`] = {
       ...(this.ctx.store.data.worktreeMeta[`${r.id}/${w.id}`] ?? { createdAt: this.ctx.now() }),
       mergedBaseSha: forkPoint,
@@ -669,7 +811,7 @@ export class RepoManager {
     for (let i = 0; i < attempts; i++) {
       if (i > 0) await new Promise((res) => setTimeout(res, 250 * 2 ** Math.min(i - 1, 3)));
       if (fs.existsSync(w.path)) {
-        const res = await git(r.path, ['worktree', 'remove', '--force', w.path], { allowFail: true });
+        const res = await this.g(r, ['worktree', 'remove', '--force', w.path], { allowFail: true });
         if (res.code !== 0 && fs.existsSync(w.path)) {
           try {
             fs.rmSync(w.path, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
@@ -679,7 +821,7 @@ export class RepoManager {
         }
       }
       if (!fs.existsSync(w.path)) {
-        await git(r.path, ['worktree', 'prune'], { allowFail: true });
+        await this.g(r, ['worktree', 'prune'], { allowFail: true });
         const meta = this.ctx.store.data.worktreeMeta[key];
         if (meta?.pendingRemoval) {
           delete meta.pendingRemoval;
@@ -710,7 +852,7 @@ export class RepoManager {
   /** Commits on `branch` that `base` does not have (0 if the branch is gone). */
   async commitsAhead(repoId: string, branch: string, base: string): Promise<number> {
     const r = this.require(repoId);
-    const res = await git(r.path, ['rev-list', '--count', `refs/heads/${base}..refs/heads/${branch}`], { allowFail: true });
+    const res = await this.g(r, ['rev-list', '--count', `refs/heads/${base}..refs/heads/${branch}`], { allowFail: true });
     return res.code === 0 ? Number(res.stdout.trim()) || 0 : 0;
   }
 
