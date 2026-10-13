@@ -3,7 +3,7 @@
 // artifacts/shots/ (or AGENTCRAFT_SHOTS_DIR). The game must be running (tools\launch.ps1 or
 // gradlew runClient). Scene format: docs/QA.md ("Scene format"); runner: tools/lib/scene.mjs.
 //
-//   node tools/shoot.mjs tools/scenes/phase1.json [--only a,b] [--port N] [--manifest out.json]
+//   node tools/shoot.mjs tools/scenes/qa.json [--only a,b] [--port N] [--manifest out.json]
 //        [--prefix qa/run1/] [--foreman [PORT]] [--anchors anchors.json] [--release] [--strict] [--verbose]
 //
 //   --prefix P      shot names are prefixed (names may contain '/', e.g. qa/<runId>/)

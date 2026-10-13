@@ -190,7 +190,7 @@ skips the shot with the reason ("needs {{merge.repoId}} but the Foreman has no o
 `waitFor` conditions: `{path | foreman, equals | notEquals | gte | lte | exists, timeoutMs,
 required, unreportedMs, optional}`. A timed-out wait is a warning unless `required: true`.
 
-Older scenes keep working (`tools/scenes/phase1.json`: `camera` + `delayMs`).
+Older scene files keep working: a bare array of shots, and `delayMs` as another name for `waitMs`.
 
 ## Adding or changing a shot
 

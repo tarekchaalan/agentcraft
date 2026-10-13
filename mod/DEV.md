@@ -594,7 +594,7 @@ node tools/devcli.mjs cmd "/fill 0 65 0 4 69 4 minecraft:oak_planks"
 node tools/devcli.mjs time 12000 | weather clear | hud off | screen pause | key escape | type "hi"
 node tools/devcli.mjs raw '{"type":"dev.waitChunks","timeoutMs":60000}'
 node tools/devcli.mjs quit                         # saves; waits for the bridge to close
-node tools/shoot.mjs tools/scenes/phase1.json [--only a,b] [--manifest out.json] [--verbose]
+node tools/shoot.mjs tools/scenes/qa-selftest.json [--only a,b] [--manifest out.json] [--foreman N] [--verbose]
 node tools/record.mjs tools/shots/hq_orbit.json [more.json] [--hold 3000] [--stills 1,3] [--window 2560x1440]   # play shots for OBS (tools/shots/README.md)
 ```
 `devcli` prints the JSON reply and exits 1 on `ok:false`. `--port` overrides the port. `--timeout`
@@ -606,9 +606,10 @@ render thread has been stuck for 30 s, and `shoot.mjs` stops at the first failed
 looks hung (`hung` in its JSON summary) instead of timing out on every remaining shot. Relaunch by
 `devcli quit` (force-exits a hung game after 15 s) and `gradlew runClient`.
 
-Scene format for shoot.mjs (see `tools/scenes/phase1.json`): `{defaults, setup:[cmds], shots:[{name,
-camera:{x,y,z,yaw,pitch | lookAt, fov}, time?, weather?, commands?, screen?, keepScreen?, hideHud?,
-frames?, delayMs?, waitChunks?}]}`, or a bare array of shots. Shots are written to `artifacts/shots/<name>.png`.
+Scene format for shoot.mjs (full reference: docs/QA.md "Scene format"; examples in `tools/scenes/`):
+`{defaults, setup:[cmds], shots:[{name, anchor?, camera:{x,y,z,yaw,pitch | lookAt, fov}, time?, weather?,
+commands?, screen?, keepScreen?, hideHud?, frames?, waitMs?, waitChunks?}]}`, or a bare array of shots.
+Shots are written to `artifacts/shots/<name>.png`.
 A shot without `fov` renders at the player's FOV option (70), exactly; scenes no longer inherit the
 previous shot's FOV.
 
@@ -679,8 +680,8 @@ The module versions are listed under `.gradle-home/caches/modules-2/files-2.1/ne
 - Gson's lenient getters are traps for a protocol: `getAsString()` on `["dev.state"]` returns
   `"dev.state"`, `getAsBoolean()` on `"yes"` returns false, `getAsLong()` on `1.5` truncates. Use `Fields`.
 - Vanilla multiplies the FOV option by a dynamic modifier (1.1 while flying, which spectators always
-  are). Shots requested at `fov:70` used to render at 77; `tools/scenes/phase1.json` was updated to 77/88
-  to keep its framing, and the dev camera now pins the exact FOV (`CameraMixin` on `Camera.calculateFov`).
+  are). Shots requested at `fov:70` used to render at 77; the first scenes were re-framed at 77/88
+  to keep their framing, and the dev camera now pins the exact FOV (`CameraMixin` on `Camera.calculateFov`).
 - Right after joining, `inWorld` is true while `LevelLoadingScreen` is still showing. Wait for `ready`.
 - Waiting only for chunks near the camera left a square horizon after long teleports. Screenshots now
   wait for the whole render distance (circular, radius rd-1, matching the server's chunk tracking).
