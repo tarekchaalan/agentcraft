@@ -17,6 +17,7 @@
   tools\launch.ps1                                     # claude backend (needs ANTHROPIC_API_KEY), ~/.agentcraft, ports 7878/7879
   tools\launch.ps1 -Repo C:\code\life-tracker          # register a repo with the Foreman
   tools\launch.ps1 -UseClaudeLogin                     # personal use: your `claude` CLI login instead of an API key
+  tools\launch.ps1 -Login                              # sign the agents' Claude Code in once (then -UseClaudeLogin)
   tools\launch.ps1 -Backend codex                      # an all-Codex team on your Codex login (`codex login`)
   tools\launch.ps1 -ForemanArgs '--worker-engine','codex'   # mixed: Claude lead, Codex workers
   tools\launch.ps1 -Backend sim                        # scripted demo team, no API calls
@@ -58,7 +59,9 @@ param(
     [int]$TimeoutSec = 600,
     [string]$SummaryJson,
     # print what would be started (commands + game env) without starting anything
-    [switch]$DryRun
+    [switch]$DryRun,
+    # sign the agents' Claude Code in (needed once for -UseClaudeLogin; its login is separate from the Claude desktop app's), then exit
+    [switch]$Login
 )
 
 $ErrorActionPreference = 'Stop'
@@ -160,6 +163,44 @@ function Install-NodeDeps([string]$Dir, [string]$Name) {
 }
 Install-NodeDeps $L.Tools 'tools'
 
+# The Claude Code CLI the agent SDK runs (bundled with the SDK); its login is separate from the Claude desktop app's.
+function Get-ClaudeCli {
+    $bundled = Join-Path $L.Foreman "node_modules\@anthropic-ai\claude-agent-sdk-win32-$($env:PROCESSOR_ARCHITECTURE.ToLowerInvariant() -replace 'amd64', 'x64')\claude.exe"
+    if (Test-Path $bundled) { return $bundled }
+    $c = Get-Command claude -ErrorAction SilentlyContinue
+    if ($c) { return $c.Source }
+    return $null
+}
+
+function Test-ClaudeLoggedIn([string]$Cli) {
+    try {
+        $out = (& $env:ComSpec /d /c "`"$Cli`" auth status 2>nul") | Out-String
+        $m = [regex]::Match($out, '\{[\s\S]*\}')
+        if (-not $m.Success) { return $false }
+        return [bool](($m.Value | ConvertFrom-Json).loggedIn)
+    } catch { return $false }
+}
+
+if ($Login) {
+    Install-NodeDeps $L.Foreman 'foreman'
+    $cli = Get-ClaudeCli
+    if (-not $cli) { Fail 'no Claude Code CLI found (foreman/node_modules is missing the SDK binary and `claude` is not on PATH)' }
+    Write-Kv 'login' "$cli auth login ..."
+    & $cli auth login
+    if ($LASTEXITCODE -ne 0 -or -not (Test-ClaudeLoggedIn $cli)) { Fail 'Claude login did not complete' }
+    Write-Kv 'login' 'ok. Now launch with -UseClaudeLogin.' 'Green'
+    $summary.ok = $true
+    Save-Summary
+    exit 0
+}
+if ($Backend -eq 'claude' -and $UseClaudeLogin -and -not $NoForeman -and -not $DryRun) {
+    # fail fast: a Foreman started without a login only reports the failure in the banner later
+    $cli = Get-ClaudeCli
+    if ($cli -and -not (Test-ClaudeLoggedIn $cli)) {
+        Fail "the agents' Claude Code is not signed in (the Claude desktop app login is separate). Run: tools\launch.ps1 -Login"
+    }
+}
+
 if (-not $NoGame) {
     $javaExe = 'java'
     if ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME 'bin\java.exe'))) { $javaExe = Join-Path $env:JAVA_HOME 'bin\java.exe' }
@@ -175,6 +216,24 @@ $fmInfo = $null
 $fmRunFile = Get-ForemanRunFile $L $AgentHome $ForemanProfile
 $live = Get-LiveForeman $AgentHome $ForemanProfile
 Write-Head 'Foreman'
+if ($live -and $Backend -eq 'claude' -and -not $NoForeman -and -not $DryRun) {
+    # a Foreman we started that failed its Claude check keeps failing until restarted; reusing it would hide a fixed login
+    $own0 = Read-JsonFile $fmRunFile
+    $ours0 = $own0 -and ([int]$own0.pid -eq [int]$live.pid) -and (Test-SameProc ([int]$own0.pid) $own0.startTime)
+    if ($ours0) {
+        $stJson0 = (& $node.Source (Join-Path $L.Tools 'foremancli.mjs') status '--port' ([string]$live.port) '--timeout' '20' 2>$null) | Out-String
+        $st0 = $null
+        try { $st0 = $stJson0 | ConvertFrom-Json } catch {}
+        if ($st0 -and $st0.ok -and $st0.foreman.auth -eq 'failed') {
+            Write-Warn2 "Foreman $($live.pid) failed its Claude auth check; restarting it"
+            $ps = (Get-Process -Id $PID).Path
+            $p = Start-Process -FilePath $ps -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'stop.ps1'), '-Foreman', '-Profile', $ForemanProfile) -NoNewWindow -Wait -PassThru
+            if ($p.ExitCode -ne 0) { Fail "could not stop Foreman $($live.pid) (stop.ps1 exit $($p.ExitCode)); stop it with tools\stop.ps1 -Foreman -Profile $ForemanProfile" }
+            $live = Get-LiveForeman $AgentHome $ForemanProfile
+            if ($live) { Fail "Foreman $($live.pid) is still answering on port $($live.port) after stop.ps1; stop it by hand" }
+        }
+    }
+}
 if ($live) {
     $fmPort = [int]$live.port
     $own = Read-JsonFile $fmRunFile

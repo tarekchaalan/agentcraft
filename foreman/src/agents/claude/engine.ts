@@ -34,7 +34,7 @@ export class ClaudeEngine implements Engine {
   }
 
   authFailedMessage(detail: string): string {
-    return `Claude authentication failed (${detail}). Run \`claude\` and /login, then restart the Foreman.`;
+    return `Claude authentication failed (${detail}). Run \`node tools/unix.mjs login\` (or \`claude\` and /login), then relaunch.`;
   }
 
   /** "claude login" (opted in), else the API authentication the environment provides */
@@ -63,7 +63,7 @@ export class ClaudeEngine implements Engine {
         ok: false,
         mode,
         message: this.cfg.useClaudeLogin
-          ? `Claude login check failed: ${(e as Error).message}. Run \`claude\` and /login, then restart the Foreman. The sim backend still works.`
+          ? `Claude login check failed: ${(e as Error).message}. Run \`node tools/unix.mjs login\` (or \`claude\` and /login), then relaunch. The sim backend still works.`
           : `Claude API check failed: ${(e as Error).message}. Check ANTHROPIC_API_KEY (or your cloud provider settings), then restart the Foreman. The sim backend still works.`,
       };
     } finally {

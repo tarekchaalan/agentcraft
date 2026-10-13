@@ -88,6 +88,7 @@ tools\launch.ps1 -Repo C:\code\life-tracker   # also register a repo with the Fo
 tools\launch.ps1 -UseClaudeLogin              # your `claude` CLI login instead of an API key (personal use); banner: auth ok (claude login)
 tools\launch.ps1 -Backend sim                 # scripted demo team (no API calls), demo repo in sandbox/
 tools\launch.ps1 -Showcase                    # static showcase state (sim); -Showcase late for the later one
+tools\launch.ps1 -Login                       # sign the agents' Claude Code in once (separate from the desktop app); -UseClaudeLogin fails fast without it
 tools\stop.ps1                                # stop what launch.ps1 started (game + Foreman)
 tools\stop.ps1 -Game                          # just the game: agents keep working, relaunch any time
 ```
