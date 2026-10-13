@@ -23,6 +23,20 @@ export interface TurnStats {
   tokens?: number;
   authFailed?: string;
   errors: string[];
+  /** a usage/rate limit refused this turn (rate_limit_event "rejected" or an API rate_limit error) */
+  limited?: boolean;
+  /** the latest rate limit report seen in the turn */
+  rateLimit?: RateLimitReport;
+}
+
+/** A plan usage report from an engine's stream (claude.ai subscription logins report these every turn). */
+export interface RateLimitReport {
+  status: 'allowed' | 'allowed_warning' | 'rejected';
+  /** epoch ms */
+  resetsAt?: number;
+  type?: string;
+  /** 0-1 */
+  utilization?: number;
 }
 
 /** The user's (or the policy's) verdict on a tool call. */
@@ -72,6 +86,8 @@ export interface TurnSpec {
   onSession(sessionId: string): void;
   /** the model the turn really runs (e.g. "claude-opus-5-5"), as soon as the engine knows it */
   onModel?(model: string): void;
+  /** a live usage report from the running turn, so the team can hold or throttle before it ends */
+  onRateLimit?(report: RateLimitReport): void;
 }
 
 /** `mode`: how the engine authenticated, or tried to (e.g. "claude login", "API key", "Amazon Bedrock") */

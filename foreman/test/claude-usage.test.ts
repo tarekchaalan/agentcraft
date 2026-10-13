@@ -453,6 +453,53 @@ describe('foreman.status.usage from the team', () => {
     expect(hh.fm.status.usage).toStrictEqual({ ...first, stale: true, error: 'usage request failed: usage endpoint unavailable' });
   });
 
+  it("a rate_limit_event that changes a window's status asks the poller for fresh numbers; repeats do not", async () => {
+    repo = await demoRepo();
+    const hh = foreman(['--use-claude-login', '--workers', 'kit', '--repo', repo]);
+    const S = '00000000-0000-4000-8000-000000000078';
+    const m = (o: Record<string, unknown>) => ({ parent_tool_use_id: null, uuid: S, ...o }) as unknown as SDKMessage;
+    const event = (status: string, rateLimitType: string) => m({ type: 'rate_limit_event', session_id: S, rate_limit_info: { status, rateLimitType, utilization: 0.9, resetsAt: Math.floor(Date.now() / 1000) + 3600 } });
+    let answers = 0;
+    const checks: Array<[string, number]> = [];
+    const queryFn = () => {
+      async function* turn(): AsyncGenerator<SDKMessage> {
+        yield m({ type: 'system', subtype: 'init', session_id: S, model: 'fake', cwd: '', tools: [] });
+        // the first "allowed" of a window, and repeats of it, are not changes
+        yield event('allowed', 'five_hour');
+        yield event('allowed', 'five_hour');
+        await new Promise((r) => setTimeout(r, 150));
+        checks.push(['after allowed', answers]);
+        yield event('allowed_warning', 'seven_day');
+        await until(() => answers >= 2, 5000).catch(() => undefined);
+        checks.push(['after warning', answers]);
+        yield event('allowed_warning', 'seven_day');
+        await new Promise((r) => setTimeout(r, 150));
+        checks.push(['after repeated warning', answers]);
+        yield m({ type: 'result', subtype: 'success', is_error: false, result: 'Nothing to do.', num_turns: 1, total_cost_usd: 0.01, session_id: S, duration_ms: 1, duration_api_ms: 1, usage: {}, modelUsage: {}, permission_denials: [] });
+      }
+      return Object.assign(turn(), {
+        close() {},
+        accountInfo: async () => ({ email: 'x' }),
+        [METHOD]: async () => {
+          answers++;
+          return sample();
+        },
+      });
+    };
+    await hh.fm.start(new ClaudeBackend(hh.fm, hh.cfg.claude, { queryFn: queryFn as never, skipAuthCheck: true }));
+    await until(() => !!hh.fm.status.usage);
+    expect(answers).toBe(1);
+    const goal = await hh.fm.submitGoal('Nothing to do here');
+    await until(() => hh.fm.goal(goal.id)!.status !== 'planning');
+    expect(checks).toEqual([
+      ['after allowed', 1],
+      ['after warning', 2],
+      ['after repeated warning', 2],
+    ]);
+    // and the turn's end asks once more, as before
+    await until(() => answers === 3);
+  });
+
   it('an API key team publishes mode api once, spawns nothing for it, and stays quiet across turns', async () => {
     repo = await demoRepo();
     const hh = foreman(['--workers', 'kit', '--repo', repo]);

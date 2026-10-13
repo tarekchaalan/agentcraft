@@ -271,7 +271,7 @@ export class ClaudeEngine implements Engine {
       ...(spec.resume ? { resume: spec.resume } : {}),
       ...(this.cfg.maxBudgetUsdPerTurn ? { maxBudgetUsd: this.cfg.maxBudgetUsdPerTurn } : {}),
     };
-    const mapper = new StreamMapper(this.fm, agentId, cwd, role);
+    const mapper = new StreamMapper(this.fm, agentId, cwd, role, spec.onRateLimit);
     const q = this.queryFn({ prompt: spec.prompt, options });
     // the abort signal alone lets a CLI finish what it is doing (seen in a real run: ~6 s of
     // further turns after /stop). close() force-ends the subprocess and its transports.

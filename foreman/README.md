@@ -93,6 +93,7 @@ most ~100 ms of state, and interrupted agent turns resume on the next start.
 | `--effort low..max` | `medium` | |
 | `--workers 3` or `--workers kit,wren` | `juniper,kit,wren` | team (others stay "off shift") |
 | `--max-concurrent` | `3` | workers running at once |
+| `--throttle-concurrent` | `1` | workers at once while your plan (claude.ai login) reports a usage warning; at the limit itself nobody starts a turn until it resets, and interrupted turns resume then |
 | `--max-turns`, `--max-budget <usd>` | 40 lead / 80 worker, none | per turn caps |
 | `--ci "<cmd>"` | detected (`npm test`, `cargo test`, ...) | run after each task |
 | `--lead-read-commands "<cmd>,..."` | none | read commands the lead runs without asking, by prefix: `"bd show,gh issue view"` lets it read your issue tracker |
