@@ -77,6 +77,12 @@ function diffFromInput(tool: string, input: Record<string, unknown>, cwd: string
   return undefined;
 }
 
+/** The one argument worth showing for a subagent's tool call. */
+function subagentArg(input: Record<string, unknown>): string {
+  for (const k of ['command', 'file_path', 'pattern', 'path', 'url', 'query', 'description']) if (typeof input[k] === 'string') return input[k] as string;
+  return '';
+}
+
 export class StreamMapper {
   private toolNames = new Map<string, string>();
   readonly stats: TurnStats = { isError: false, errors: [] };
@@ -95,16 +101,26 @@ export class StreamMapper {
     const id = this.agentId;
     switch (msg.type) {
       case 'system': {
-        const m = msg as { subtype?: string; session_id?: string; model?: string };
+        const m = msg as { subtype?: string; session_id?: string; model?: string; tool_name?: string; agent_id?: string; decision_reason_type?: string; decision_reason?: string; message?: string };
         if (m.subtype === 'init' && m.session_id) {
           this.stats.sessionId = m.session_id;
           if (m.model) this.model = m.model;
           fm.log.debug(`${id}: session ${m.session_id} (${m.model ?? '?'})`);
+        } else if (m.subtype === 'permission_denied') {
+          // auto mode's classifier (or a rule) refused a call without asking anyone
+          const why = [m.decision_reason_type, m.decision_reason ?? m.message].filter(Boolean).join(': ');
+          fm.agentLog(id, 'error', `denied${m.agent_id ? ' (subagent)' : ''}: ${m.tool_name ?? 'tool'}${why ? ` (${truncate(why, 160)})` : ''}`);
         }
         break;
       }
       case 'assistant': {
-        if (msg.parent_tool_use_id) break; // subagent chatter (disabled anyway)
+        if (msg.parent_tool_use_id) {
+          // a subagent's work: its tool calls, one line each, so the monitor shows it is busy
+          for (const b of (msg.message?.content ?? []) as Block[]) {
+            if (b.type === 'tool_use' && b.name) fm.agentLog(id, 'tool', `↳ subagent ${b.name}${b.input && typeof b.input === 'object' ? ` ${truncate(subagentArg(b.input as Record<string, unknown>), 120)}` : ''}`);
+          }
+          break;
+        }
         if (msg.error) {
           const err = String(msg.error);
           this.stats.errors.push(err);
