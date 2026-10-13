@@ -434,7 +434,7 @@ usage: npm run start -- [options]
   --lead-read-commands "<cmd>,..."
                            read commands the lead runs without asking, by prefix, e.g.
                            "bd show,gh issue view" (env AGENTCRAFT_LEAD_READ_COMMANDS)
-  --repo-context           give the agents each repo's CLAUDE.md and .claude/rules (config.json
+  --repo-context           give Claude agents each repo's CLAUDE.md and .claude/rules (config.json
                            claude.repoContext; also claude.instructionsFile, mcpServers, mcpAllow)
   --no-lead-review         skip the lead's review turn before merge decisions
   --no-resume              do not resume interrupted sessions on start
