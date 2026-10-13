@@ -151,6 +151,10 @@ treated the same, other binary frames get an `ok:false` reply).
 | `dev.key` | `key` (`escape`, `key.keyboard.f3`, ...) + `modifiers?` (0-65535), or `mapping` (`key.chat`) | Sent to the open screen's `keyPressed`, otherwise as a key-mapping click |
 | `dev.type` | `text` (up to 100000 chars) | `charTyped` into the open screen's focused widget |
 | `dev.hud` | `hidden: bool` | Like F1 |
+| `dev.hud.state` | (none) | The AgentCraft HUD: overlay `style` / `position` / `size`, `rect` (GUI px, null when hidden), `hidden` (null, `no_world`, `f1`, `off`, `no_data`, `combat`, `idle`, `no_room`), `overlaps{bossbar,effects,hotbar,chat,pill,offscreen,sidebar,subtitles,toasts,banner,any}` (all false when settled), `peek{enabled,active,kind,text,remainingMs,waiting}`, `overlay{settings,scale,effectivePx,contentW/H,placedAt,fallback,text,inCombat,env{...rects},toastColumn}`, plus decisions `waiting`, toasts, sounds, key labels |
+| `dev.hud.set` | `style?` (`off`/`pill`/`pill_plus`/`panel`), `position?`, `size?` (`s`/`m`/`l`), `peek?`, `autoHide?`, `hideInCombat?`, `cycle?`, `clearChat?`, `clearPeek?` | Changes the overlay settings (saved to `hud.json`, like `/hud`); replies `dev.hud.state` |
+| `dev.hud.peek` | `text`, `kind?` (`task_done`/`decision`/`goal_done`) | Shows a peek whatever the peek setting; replies `dev.hud.state` |
+| `dev.hud.vanilla` | `subtitles?: bool` (this session), `toast?: text` | Puts vanilla HUD extras on screen for layout checks (sidebar: `/scoreboard objectives setdisplay sidebar`); replies `dev.hud.state` |
 | `dev.waitChunks` | `timeoutMs?` (30000; also the request timeout), `radius?` (0-64) | Waits for chunks to load and build (same condition as screenshots) |
 | `dev.wait` | `frames?` (0-36000), `ms?` (0-600000) | Waits for rendered frames and/or wall time; the default request timeout grows with both |
 | `dev.quit` | `forceAfterMs?` (15000, 1000-600000) | Replies `{quitting, alreadyQuitting, renderThreadStalled, forceAfterMs}`, then calls `mc.stop()` 250 ms later: the world saves and the JVM exits (about 1-2 s). **Watchdog:** if the render thread is hung and has not run the stop after `forceAfterMs`, it logs the render thread's stack, stops the integrated server (which saves the world), then halts the JVM with **exit code 3** (`runClient` then ends with BUILD FAILED). If a normal shutdown is still running after 90 s it does the same with exit code 4 |
@@ -437,6 +441,21 @@ name on the screen).
   arrived as `C:/Program Files/Git/agentcraft hq`). Use `devcli cmd "agentcraft hq"`; the slash is optional.
 - A Foreman profile can only run once at a time. Parallel specialists must use their own `--profile`
   (and port).
+
+## HUD overlay styles
+
+`client.hud.HudOverlay` draws the goal overlay in the style from `<gameDir>/agentcraft/hud.json`
+(`HudConfig`, pure `dev.agentcraft.hud.HudSettings`; default Panel at the top centre, which is the
+original goal bar). Placement is pure (`dev.agentcraft.hud.HudLayout`): each frame `HudEnv` measures
+what vanilla draws (boss bars, effect icons, hotbar + status rows, chat, scoreboard sidebar,
+subtitles, vanilla toasts; read through accessor mixins `BossHealthOverlayAccessor`,
+`ChatComponentAccessor`, `HudAccessor`, `SubtitleOverlayAccessor`, `SubtitleAccessor`,
+`ToastManagerAccessor`, `ToastInstanceAccessor`) plus the connection pill and auth banner, and the
+overlay slides past them, falls back to top right, or hides as `no_room`. Sizes S/M/L are one GUI
+scale step down/up (whole pixels, never below 2 framebuffer px). Peeks (`HudPeek`, `HudPeeks`) come
+from Foreman upserts, never from snapshots. No scissor anywhere in the overlay (the fork hit a GUI
+renderer crash with an empty nested scissor). Commands: console `/hud ...`, chat `/achud ...` (both
+parsed by `HudCommand`; not `/agentcraft hud`, which would shadow the server's operator command).
 
 ## Tools (repo `tools/`, Node 22, local `ws` dependency: run `npm install` in tools/ once)
 

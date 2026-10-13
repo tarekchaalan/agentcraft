@@ -4,12 +4,19 @@
 	"compatibilityLevel": "JAVA_25",
 	"client": [
 		"BackupConfirmScreenAccessor",
+		"BossHealthOverlayAccessor",
 		"CameraAccessor",
 		"CameraMixin",
+		"ChatComponentAccessor",
 		"ClientLevelAccessor",
 		"EntityRenderDispatcherMixin",
+		"HudAccessor",
 		"MinecraftMixin",
-		"RenderSystemMixin"
+		"RenderSystemMixin",
+		"SubtitleAccessor",
+		"SubtitleOverlayAccessor",
+		"ToastInstanceAccessor",
+		"ToastManagerAccessor"
 	],
 	"injectors": {
 		"defaultRequire": 1

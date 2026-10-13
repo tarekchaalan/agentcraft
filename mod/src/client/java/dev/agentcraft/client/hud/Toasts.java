@@ -27,11 +27,12 @@ import org.jspecify.annotations.Nullable;
 /**
  * In-game paper toasts for the Foreman's {@code notify}: the agent's framed portrait, who it is
  * about, two lines of text; "need you" toasts get a clay stripe and the decisions key hint. They slide
- * in at the top right under the connection pill, stack (newest on top, three at most), and leave
+ * in beside the overlay ({@link HudOverlay#toastColumn}: under the connection pill and the overlay, or above the
+ * overlay when it sits at the bottom of the screen), stack (newest on top, three at most), and leave
  * early once their decision is answered. Not shown while the decision screen is open.
  */
 public final class Toasts implements HudElement {
-	private static final int W = 196;
+	static final int W = 196;
 	private static final int MAX = 3;
 	private static final int SLIDE_MS = 180;
 	private static final int FADE_MS = 350;
@@ -122,18 +123,43 @@ public final class Toasts implements HudElement {
 			return;
 		}
 		Font font = mc.font;
-		// under the connection pill (one or two lines tall)
-		int y = Math.max(40, ConnectionBanner.pillBottom + 6);
-		// stay clear of the goal bar when the screen is narrow enough for them to meet
-		if (GoalBar.right > g.guiWidth() - 6 - W - 4) {
-			y = Math.max(y, GoalBar.bottom + 6);
+		// the column the overlay left for us: under it (and the connection pill), or above it at the bottom
+		var col = HudOverlay.toastColumn();
+		int x = col.x();
+		boolean fromLeft = x < g.guiWidth() / 2;
+		if (col.up()) {
+			int y = col.bottom();
+			for (Toast t : ACTIVE) {
+				int h = height(font, t);
+				y -= h;
+				if (y < col.top()) {
+					break;
+				}
+				draw(g, font, t, now, x, y, fromLeft);
+				y -= 4;
+			}
+			return;
 		}
+		int y = Math.max(col.top(), 40);
 		for (Toast t : ACTIVE) {
-			y += draw(g, font, t, now, y) + 4;
+			int h = height(font, t);
+			if (y + h > col.bottom()) {
+				break;
+			}
+			draw(g, font, t, now, x, y, fromLeft);
+			y += h + 4;
 		}
 	}
 
-	private static int draw(GuiGraphicsExtractor g, Font font, Toast t, long now, int y) {
+	private static int height(Font font, Toast t) {
+		Kit.Padding p = Kit.padding("panel_paper");
+		boolean need = t.n().level() == NotifyLevel.NEED_USER;
+		int textW = W - p.left() - 26 - p.right();
+		int lines = Math.min(2, TextUtil.wrap(font, UiBits.oneLine(t.body()), textW).size());
+		return Math.max(p.top() + 20 + p.bottom() - 2, p.top() + 10 + lines * 10 + (need ? 12 : 0) + p.bottom() - 2);
+	}
+
+	private static int draw(GuiGraphicsExtractor g, Font font, Toast t, long now, int x0, int y, boolean fromLeft) {
 		Kit.Padding p = Kit.padding("panel_paper");
 		boolean need = t.n().level() == NotifyLevel.NEED_USER;
 		int textX = p.left() + 26;
@@ -150,7 +176,8 @@ public final class Toasts implements HudElement {
 		slide = 1f - (1f - slide) * (1f - slide);
 		long left = t.life() - age;
 		float fade = left < FADE_MS ? Math.max(0f, left / (float) FADE_MS) : 1f;
-		int x = g.guiWidth() - 6 - W + (int) ((1f - slide) * (W + 10));
+		// slides in from the nearer screen edge
+		int x = fromLeft ? x0 - (int) ((1f - slide) * (W + 10)) : x0 + (int) ((1f - slide) * (W + 10));
 		int a = (int) (255 * fade);
 		if (a < 8) {
 			return h;

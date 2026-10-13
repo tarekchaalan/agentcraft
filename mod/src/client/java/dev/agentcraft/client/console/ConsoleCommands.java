@@ -11,6 +11,7 @@ import dev.agentcraft.client.foreman.Protocol.Task;
 import dev.agentcraft.client.foreman.Protocol.TaskStatus;
 import dev.agentcraft.client.foreman.Protocol.Worktree;
 import dev.agentcraft.client.foreman.Protocol.WorktreeStatus;
+import dev.agentcraft.hud.HudCommand;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,6 +33,7 @@ import org.jspecify.annotations.Nullable;
  * /task &lt;id&gt; cancel|retry|prioritize [n]|reassign @x
  * /diff [worktree|@agent]          diff review screen (or a summary)
  * /status /help /decide /clear /sound on|off
+ * /hud [off|pill|pill+|panel] [position] [s|m|l] ...   the overlay style ({@link HudCommand})
  * </pre>
  */
 public final class ConsoleCommands {
@@ -41,7 +43,7 @@ public final class ConsoleCommands {
 	// ------------------------------------------------------------------ intents
 
 	public sealed interface Intent permits Goal, Message, Answer, RepoAdd, Repos, AgentAction, TaskAction, ShowDiff, Status, Help, Decide, Clear,
-		Sound, Invalid, Empty {
+		Sound, Hud, Invalid, Empty {
 	}
 
 	/** {@code repoId} null = the Foreman's default; {@code choices} non-empty = ask which repo first. */
@@ -85,6 +87,10 @@ public final class ConsoleCommands {
 	public record Sound(@Nullable Boolean on) implements Intent {
 	}
 
+	/** The HUD overlay settings ({@link HudCommand}); an empty change shows them. */
+	public record Hud(HudCommand.Change change) implements Intent {
+	}
+
 	public record Invalid(String error) implements Intent {
 	}
 
@@ -108,6 +114,7 @@ public final class ConsoleCommands {
 		new Command("repos", "/repos", "list repos"),
 		new Command("status", "/status", "goal, agents, tasks and decisions"),
 		new Command("sound", "/sound on|off", "decision bell and done chime"),
+		new Command("hud", "/hud off|pill|pill+|panel [position] [s|m|l]", "the HUD overlay style, position and size"),
 		new Command("clear", "/clear", "clear the console's own lines"),
 		new Command("help", "/help", "this list"));
 
@@ -186,6 +193,10 @@ public final class ConsoleCommands {
 			case "decide", "decisions", "d" -> new Decide(args.isEmpty() ? null : args.get(0));
 			case "clear", "cls" -> new Clear();
 			case "sound", "sounds", "mute" -> parseSound(cmd, args);
+			case "hud" -> {
+				HudCommand.Parsed p = HudCommand.parse(rest);
+				yield p.ok() ? new Hud(p.change()) : new Invalid(p.error());
+			}
 			case "goal" -> rest.isEmpty() ? new Invalid("type the goal after /goal") : goal(rest, s);
 			default -> new Invalid("unknown command /" + cmd + " (/help lists them)");
 		};
@@ -491,6 +502,7 @@ public final class ConsoleCommands {
 			case Decide d -> "open decisions";
 			case Clear c -> "clear console";
 			case Sound so -> so.on() == null ? "sound status" : so.on() ? "sound on" : "sound off";
+			case Hud h -> HudCommand.describe(h.change());
 			case Invalid i -> null;
 			case Empty e -> null;
 		};
@@ -611,6 +623,22 @@ public final class ConsoleCommands {
 						if (o.startsWith(lower)) {
 							out.add(new Completion(ts, cursor, o, o, null, null, null));
 						}
+					}
+				}
+			}
+			case "/hud" -> {
+				// the bare words, and the values after style / position / size / peek / autohide / combat
+				String prev = before.get(before.size() - 1).toLowerCase(Locale.ROOT);
+				List<String> opts = switch (prev) {
+					case "style" -> List.of("off", "pill", "pill+", "panel");
+					case "position", "pos" -> List.of("top_center", "top_right", "top_left", "bottom_left", "bottom_right", "right_middle");
+					case "size" -> List.of("s", "m", "l");
+					case "peek", "autohide", "combat" -> List.of("on", "off");
+					default -> HudCommand.WORDS;
+				};
+				for (String o : opts) {
+					if (o.startsWith(lower) && !o.equals(lower)) {
+						out.add(new Completion(ts, cursor, o + " ", o, null, null, null));
 					}
 				}
 			}
@@ -795,6 +823,7 @@ public final class ConsoleCommands {
 			case Help h -> m.put("topic", h.topic());
 			case Decide d -> m.put("decisionId", d.decisionId());
 			case Sound so -> m.put("on", so.on());
+			case Hud h -> m.put("hud", HudCommand.describe(h.change()));
 			case Invalid i -> m.put("error", i.error());
 			default -> {
 			}

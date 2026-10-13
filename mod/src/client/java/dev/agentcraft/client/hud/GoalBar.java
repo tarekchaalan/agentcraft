@@ -1,147 +1,107 @@
 package dev.agentcraft.client.hud;
 
-import dev.agentcraft.client.decisions.DecisionScreen;
-import dev.agentcraft.client.decisions.DecisionsFeature;
-import dev.agentcraft.client.foreman.Foreman;
 import dev.agentcraft.client.foreman.ForemanState;
-import dev.agentcraft.client.foreman.Protocol.Goal;
 import dev.agentcraft.client.foreman.Protocol.GoalStatus;
-import dev.agentcraft.client.foreman.Protocol.Task;
-import dev.agentcraft.client.foreman.Protocol.TaskStatus;
 import dev.agentcraft.client.ui.Kit;
 import dev.agentcraft.client.ui.Panels;
 import dev.agentcraft.client.ui.TextUtil;
 import dev.agentcraft.client.ui.UiStyle;
-import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
-import net.minecraft.client.DeltaTracker;
-import net.minecraft.client.Minecraft;
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 
 /**
- * Boss-bar style goal progress at the top centre: the goal text with its status dot and percentage,
- * a progress bar, and the task counts by column. Under it hangs the decisions badge
- * ("2 waiting · J", pulsing clay) whenever decisions are open. With no goal yet a small hint says how
- * to give one. Dimmed while the Foreman link is down (last known state).
+ * The Panel overlay style (the original boss-bar style goal HUD, now placed by {@link HudOverlay}): the goal text
+ * with its status dot and percentage, a progress bar, and the task counts by column. Under it hangs the decisions
+ * badge ("2 waiting · J", pulsing clay) whenever decisions are open, and the peek while one shows. With no goal yet
+ * a small hint says how to give one. Dimmed while the Foreman link is down (last known state). The blocks stack in
+ * a column aligned to the overlay's side (centred at the top centre). Drawn in overlay px from the origin. Also
+ * keeps the QA fields {@code dev.hud.state} has always reported.
  */
-public final class GoalBar implements HudElement {
-	public static final int TOP = 6;
+public final class GoalBar {
 	private static final int MAX_W = 300;
-	/** Narrower than this and the bar moves below the connection pill instead of squeezing next to it. */
-	private static final int MIN_W = 220;
-	/** Free GUI px kept between the bar and the connection pill. */
-	private static final int PILL_GAP = 6;
 	private static final long DONE_FADE_MS = 60_000;
+	private static final int GAP = 2;
 
-	private long cachedRevision = -1;
-	private final int[] counts = new int[5]; // doing review todo blocked done
-	private int totalTasks;
-
-	/** Bottom edge of what this element drew last frame (toasts / other HUD stack below it). */
+	/** Bottom edge of what the overlay drew last frame (GUI px; 0 = nothing). */
 	public static int bottom = 0;
-	/** Right edge of the widest thing it drew last frame (0 = nothing). */
+	/** Right edge of what the overlay drew last frame (0 = nothing). */
 	public static int right = 0;
 	/** QA: something drawn last frame intersected the connection pill. */
 	public static boolean pillClash;
 
-	@Override
-	public void extractRenderState(GuiGraphicsExtractor g, DeltaTracker deltaTracker) {
-		Minecraft mc = Minecraft.getInstance();
-		ForemanState s = Foreman.state();
-		bottom = 0;
-		right = 0;
-		pillClash = false;
-		if (mc.player == null || s == null || !s.hasData()) {
-			return;
-		}
-		Font font = mc.font;
-		int y = TOP + authBannerOffset(s, font, g);
-		boolean stale = s.isStale();
-		// panels stay opaque (legible over any background); offline / long-done content is dimmed instead
-		int alpha = stale ? 200 : 255;
-		Goal goal = s.goal();
-		boolean decisionScreen = mc.gui.screen() instanceof DecisionScreen;
-		if (goal != null) {
-			long age = System.currentTimeMillis() - goal.updatedAt();
-			if (goal.status() == GoalStatus.DONE && age > DONE_FADE_MS) {
-				alpha = Math.min(alpha, 190);
-			}
-			y = drawGoal(g, font, s, goal, y, alpha, stale);
-		} else if (!stale) {
-			y = drawNoGoal(g, font, y);
-		}
-		int waiting = DecisionsFeature.waitingCount();
-		if (waiting > 0 && !decisionScreen) {
-			y = drawBadge(g, font, waiting, y + 2, alpha);
-		}
-		bottom = y;
+	private GoalBar() {
 	}
 
-	/** The connection feature draws a loud paper banner at the top centre when auth failed: stack below it. */
-	private static int authBannerOffset(ForemanState s, Font font, GuiGraphicsExtractor g) {
-		var fs = s.status();
-		if (fs == null || fs.auth() != dev.agentcraft.client.foreman.Protocol.AuthStatus.FAILED || !s.link().synced()) {
-			return 0;
-		}
-		String msg = fs.message() != null ? fs.message() : "run `claude` and /login, then restart the Foreman";
-		int maxW = Math.min(360, g.guiWidth() - 40);
-		int lines = TextUtil.wrap(font, msg, maxW - 34).size();
-		Kit.Padding p = Kit.padding("panel_paper");
-		return p.top() + 10 + lines * 10 + p.bottom() + 4;
+	private enum Kind {
+		GOAL, NO_GOAL, BADGE, PEEK
 	}
 
-	private void recount(ForemanState s, Goal goal) {
-		if (s.revision() == cachedRevision) {
-			return;
+	private record Block(Kind kind, int w, int h) {
+	}
+
+	/** The panel's blocks for {@code maxW} overlay px. */
+	private static List<Block> blocks(HudModel m, Font font, int maxW) {
+		Kit.Padding p = Kit.padding("tooltip");
+		List<Block> out = new ArrayList<>();
+		int line = p.top() + 10 + p.bottom() + 1;
+		if (m.goal != null) {
+			out.add(new Block(Kind.GOAL, Math.min(MAX_W, maxW), p.top() + 9 + 4 + 6 + 4 + 9 + p.bottom()));
+		} else if (!m.stale) {
+			String key = Keys.console == null ? "Backtick" : Keys.label(Keys.console);
+			int w = p.left() + 11 + font.width("No goal yet · press") + 4 + UiBits.keycapWidth(font, key) + 4 + font.width("to give the team one") + p.right()
+				+ 2;
+			out.add(new Block(Kind.NO_GOAL, Math.min(w, maxW), line));
 		}
-		cachedRevision = s.revision();
-		java.util.Arrays.fill(counts, 0);
-		totalTasks = 0;
-		for (Task t : s.tasks().values()) {
-			if (goal.id() != null && t.goalId() != null && !t.goalId().equals(goal.id())) {
-				continue;
-			}
-			int i = switch (t.status()) {
-				case DOING -> 0;
-				case REVIEW -> 1;
-				case TODO -> 2;
-				case BLOCKED -> 3;
-				case DONE -> 4;
-				default -> -1;
+		if (m.waiting > 0) {
+			String key = Keys.decisions == null ? "J" : Keys.label(Keys.decisions);
+			out.add(new Block(Kind.BADGE, Math.min(maxW, p.left() + 13 + font.width(m.waiting + " waiting · press") + 4 + UiBits.keycapWidth(font, key)
+				+ p.right() + 1), line));
+		}
+		if (m.peek != null) {
+			out.add(new Block(Kind.PEEK, Math.min(maxW, p.left() + 12 + font.width(m.peek.text()) + p.right() + 1), line));
+		}
+		return out;
+	}
+
+	/** Overlay px: width and height of the panel. */
+	static int[] measure(HudModel m, Font font, int maxW) {
+		int w = 0;
+		int h = 0;
+		for (Block b : blocks(m, font, maxW)) {
+			w = Math.max(w, b.w());
+			h += (h > 0 ? GAP : 0) + b.h();
+		}
+		return new int[] {w, h};
+	}
+
+	/** How the blocks line up inside the panel's width. */
+	enum Align {
+		LEFT, CENTER, RIGHT
+	}
+
+	/** Draws the panel at the origin, {@code w} wide; blocks narrower than that follow {@code align}. */
+	static void draw(GuiGraphicsExtractor g, Font font, HudModel m, int w, Align align) {
+		int alpha = m.stale ? 200 : 255;
+		if (m.goal != null && m.goal.status() == GoalStatus.DONE && System.currentTimeMillis() - m.goal.updatedAt() > DONE_FADE_MS) {
+			alpha = Math.min(alpha, 190);
+		}
+		int y = 0;
+		for (Block b : blocks(m, font, w)) {
+			int x = switch (align) {
+				case LEFT -> 0;
+				case CENTER -> (w - b.w()) / 2;
+				case RIGHT -> w - b.w();
 			};
-			if (i >= 0) {
-				counts[i]++;
-				totalTasks++;
+			switch (b.kind()) {
+				case GOAL -> drawGoal(g, font, m, x, y, b.w(), b.h(), alpha);
+				case NO_GOAL -> drawNoGoal(g, font, x, y, b.w(), b.h());
+				case BADGE -> drawBadge(g, font, m, x, y, b.w(), b.h(), alpha);
+				case PEEK -> drawPeek(g, font, m, x, y, b.w(), b.h(), alpha);
 			}
+			y += b.h() + GAP;
 		}
-	}
-
-	/**
-	 * Where a centred element {@code wantW} wide (at most) goes at row {@code y}: beside the connection
-	 * pill (top right) when it fits there at {@code minW} or more, else below the pill. The pill's real
-	 * extent comes from this frame ({@link ConnectionBanner} draws first), so a long "Reconnecting to the
-	 * Foreman (5) / showing last known state" pill never lands on the bar. Returns x, y, w.
-	 */
-	private static int[] place(GuiGraphicsExtractor g, int y, int h, int wantW, int minW) {
-		int gw = g.guiWidth();
-		int w = Math.min(wantW, gw - 24);
-		int x = (gw - w) / 2;
-		int pl = ConnectionBanner.pillLeft;
-		int pb = ConnectionBanner.pillBottom;
-		boolean rowsMeet = pb > 0 && y < pb + 3 && y + h > 0;
-		if (rowsMeet && x + w > pl - PILL_GAP) {
-			int fit = 2 * (pl - PILL_GAP - gw / 2);
-			if (fit >= Math.min(minW, wantW)) {
-				w = Math.min(w, fit);
-				x = (gw - w) / 2;
-			} else {
-				y = pb + 4;
-			}
-		}
-		if (pb > 0 && x + w > pl && y < pb) {
-			pillClash = true;
-		}
-		return new int[] {x, y, w};
 	}
 
 	/** While planning: the lead is planning, unless it is waiting on your answer (a question before the plan). */
@@ -156,15 +116,10 @@ public final class GoalBar implements HudElement {
 		return "Marlow is planning the tasks…";
 	}
 
-	private int drawGoal(GuiGraphicsExtractor g, Font font, ForemanState s, Goal goal, int y0, int alpha, boolean stale) {
-		recount(s, goal);
+	private static void drawGoal(GuiGraphicsExtractor g, Font font, HudModel m, int x, int y, int w, int h, int alpha) {
+		HudModel.GoalView goal = m.goal;
+		boolean stale = m.stale;
 		Kit.Padding p = Kit.padding("tooltip");
-		int h = p.top() + 9 + 4 + 6 + 4 + 9 + p.bottom();
-		int[] at = place(g, y0, h, MAX_W, MIN_W);
-		int x = at[0];
-		int y = at[1];
-		int w = at[2];
-		right = Math.max(right, x + w);
 		int tint = (alpha << 24) | 0xFFFFFF;
 		Panels.sprite(g, Kit.TOOLTIP, x, y, w, h);
 		int ix = x + p.left() + 1;
@@ -205,10 +160,9 @@ public final class GoalBar implements HudElement {
 			family = "idle";
 		}
 		Panels.sprite(g, Kit.dot(family, false), ix, ty + 1, 7, 7, tint);
-		int pct = (int) Math.round(Math.max(0, Math.min(1, goal.progress())) * 100);
-		String pctS = pct + "%";
+		String pctS = goal.pct() + "%";
 		int pctW = font.width(pctS);
-		String text = prefix + UiBits.oneLine(goal.text());
+		String text = prefix + goal.text();
 		int textColor = stale ? UiBits.activityOnInk() : UiBits.cream();
 		g.text(font, TextUtil.ellipsize(font, text, iw - 11 - pctW - 8), ix + 11, ty, UiStyle.withAlpha(textColor, alpha), false);
 		g.text(font, pctS, ix + iw - pctW, ty, UiStyle.withAlpha(stale ? UiBits.activityOnInk() : UiStyle.BRASS, alpha), false);
@@ -226,16 +180,17 @@ public final class GoalBar implements HudElement {
 		String[] fams = {"working", "thinking", "idle", "error", "done"};
 		int cx = ix;
 		int act = UiStyle.withAlpha(UiBits.activityOnInk(), alpha);
-		if (totalTasks == 0) {
-			g.text(font, goal.status() == GoalStatus.PLANNING ? planningLine(s) : "no tasks yet", cx, cy, act, false);
+		int[] counts = m.counts;
+		if (m.totalTasks == 0) {
+			g.text(font, goal.status() == GoalStatus.PLANNING ? m.planningLine : "no tasks yet", cx, cy, act, false);
 		} else {
 			// done count on the right ("2/9 done"), the open columns on the left with labels when they fit
-			String done = counts[4] + "/" + totalTasks + " done";
+			String done = counts[4] + "/" + m.totalTasks + " done";
 			int doneW = font.width(done);
 			Panels.sprite(g, Kit.dot("done", false), ix + iw - doneW - 9, cy + 1, 7, 7, tint);
 			g.text(font, done, ix + iw - doneW, cy, act, false);
 			int room = iw - doneW - 9 - 10;
-			boolean withLabels = countsWidth(font, labels, true) <= room;
+			boolean withLabels = countsWidth(font, counts, labels, true) <= room;
 			int open = counts[0] + counts[1] + counts[2] + counts[3];
 			if (open == 0) {
 				String all = goal.status() == GoalStatus.DONE ? "finished " + UiBits.ago(goal.updatedAt()) : "nothing open right now";
@@ -255,10 +210,9 @@ public final class GoalBar implements HudElement {
 				cx += 9 + font.width(c) + 8;
 			}
 		}
-		return y + h;
 	}
 
-	private int countsWidth(Font font, String[] labels, boolean withLabels) {
+	private static int countsWidth(Font font, int[] counts, String[] labels, boolean withLabels) {
 		int w = 0;
 		for (int i = 0; i < 4; i++) {
 			if (counts[i] == 0) {
@@ -269,18 +223,12 @@ public final class GoalBar implements HudElement {
 		return Math.max(0, w - 8);
 	}
 
-	private int drawNoGoal(GuiGraphicsExtractor g, Font font, int y0) {
+	private static void drawNoGoal(GuiGraphicsExtractor g, Font font, int x, int y, int w, int h) {
 		String key = Keys.console == null ? "Backtick" : Keys.label(Keys.console);
 		String a = "No goal yet · press";
 		String b = "to give the team one";
 		Kit.Padding p = Kit.padding("tooltip");
 		int kw = UiBits.keycapWidth(font, key);
-		int w = p.left() + 11 + font.width(a) + 4 + kw + 4 + font.width(b) + p.right() + 2;
-		int h = p.top() + 10 + p.bottom() + 1;
-		int[] at = place(g, y0, h, w, w);
-		int x = at[0];
-		int y = at[1];
-		right = Math.max(right, x + w);
 		Panels.sprite(g, Kit.TOOLTIP, x, y, w, h, 0xE6FFFFFF);
 		int cx = x + p.left() + 1;
 		int ty = y + p.top() + 1;
@@ -291,34 +239,40 @@ public final class GoalBar implements HudElement {
 		UiBits.keycap(g, font, key, cx, ty - 2);
 		cx += kw + 4;
 		g.text(font, b, cx, ty, UiBits.activityOnInk(), false);
-		return y + h;
 	}
 
-	private int drawBadge(GuiGraphicsExtractor g, Font font, int waiting, int y0, int alpha) {
+	private static void drawBadge(GuiGraphicsExtractor g, Font font, HudModel m, int x, int y, int w, int h, int alpha) {
 		String key = Keys.decisions == null ? "J" : Keys.label(Keys.decisions);
-		String text = waiting + " waiting · press";
+		String text = m.waiting + " waiting · press";
 		Kit.Padding p = Kit.padding("tooltip");
-		int kw = UiBits.keycapWidth(font, key);
-		int w = p.left() + 13 + font.width(text) + 4 + kw + p.right() + 1;
-		int h = p.top() + 10 + p.bottom() + 1;
-		int[] at = place(g, y0, h, w, w);
-		int x = at[0];
-		int y = at[1];
-		right = Math.max(right, x + w);
 		Panels.sprite(g, Kit.TOOLTIP, x, y, w, h);
 		int cx = x + p.left() + 2;
 		int ty = y + p.top() + 1;
-		boolean stale = Foreman.state() != null && Foreman.state().isStale();
-		if (stale) {
+		if (m.stale) {
 			// can't be answered until the Foreman is back: no pulse, no clay
 			Panels.sprite(g, Kit.dot("idle", false), cx, ty, 7, 7);
 		} else {
 			UiBits.pulsingDot(g, "waiting", cx, ty);
 		}
 		cx += 11;
-		g.text(font, text, cx, ty, UiStyle.withAlpha(stale ? UiBits.activityOnInk() : UiStyle.CLAY, alpha), false);
+		g.text(font, text, cx, ty, UiStyle.withAlpha(m.stale ? UiBits.activityOnInk() : UiStyle.CLAY, alpha), false);
 		cx += font.width(text) + 4;
 		UiBits.keycap(g, font, key, cx, ty - 2);
-		return y + h;
+	}
+
+	private static void drawPeek(GuiGraphicsExtractor g, Font font, HudModel m, int x, int y, int w, int h, int alpha) {
+		Kit.Padding p = Kit.padding("tooltip");
+		Panels.sprite(g, Kit.TOOLTIP, x, y, w, h);
+		int cx = x + p.left() + 2;
+		int ty = y + p.top() + 1;
+		Panels.sprite(g, Kit.dot(HudPeeks.family(m.peek.kind()), false), cx, ty, 7, 7, (alpha << 24) | 0xFFFFFF);
+		g.text(font, TextUtil.ellipsize(font, m.peek.text(), w - p.left() - p.right() - 13), cx + 10, ty, UiStyle.withAlpha(UiBits.cream(), alpha), false);
+	}
+
+	/** Resets the per-frame QA fields (the overlay calls it before drawing). */
+	static void beginFrame() {
+		bottom = 0;
+		right = 0;
+		pillClash = false;
 	}
 }

@@ -11,6 +11,7 @@ Shots: `tools/scenes/console.json` (showcase busy state).
 | `` ` `` (Backtick) | open the console (again with an empty input: close it) |
 | `Enter` while looking at a console terminal | open the console (a right-click on the terminal does too) |
 | `J` | open the decision queue (a right-click on the Decision Podium does too) |
+| (unbound) | cycle the HUD overlay style: Off, Pill, Pill+, Panel (`/hud cycle` does the same) |
 
 Neither screen pauses the game: agents keep walking and working behind it.
 
@@ -37,6 +38,7 @@ back the next time it opens (this session), and the console terminal shows it on
 | `/task <id> cancel\|retry\|prioritize [n]\|reassign @x` | `task.action` |
 | `/diff [worktree\|@agent\|task]` | opens the diff screen (`diff`, owned by the diff feature); without one, prints a file summary from `diff.request` |
 | `/status`, `/help`, `/decide`, `/clear`, `/sound on\|off` | local |
+| `/hud [off\|pill\|pill+\|panel] [position] [s\|m\|l]`, `/hud peek\|autohide\|combat on\|off`, `/hud cycle`, `/hud reset` | local: the HUD overlay (saved to `<game dir>/agentcraft/hud.json`); `/hud` alone shows the settings |
 
 Tab completes agent names (also after `/pause` etc.), commands, decision ids and options, task ids
 and worktrees; repeated Tab cycles, Up/Down move in the popup. Up/Down otherwise walk the history
@@ -89,13 +91,21 @@ covers (tied to key 2). Buttons: Allow once (1), Always allow (2, sends the exac
 
 ## HUD
 
-- Goal bar (top centre, boss-bar style): status dot, goal text, %, progress bar, the open task
+- Overlay style (`/hud` in the console, `/achud` in chat, or the unbound "Cycle the HUD style" key):
+  **Panel** by default (the goal bar and badge below, as before); **Pill**, one compact ink line
+  ("39% · 2 decisions [J] · 1 blk"); **Pill+**, the goal title and %, a bar, who is working and the
+  next decision's first words; **Off**. Positions top centre / top right / top left / bottom left /
+  bottom right / right middle (`/hud bottom_left`), sizes S/M/L (`/hud s`), a 5 s peek on changes
+  (`/hud peek off`), auto-hide when idle (`/hud autohide on`) and hide in combat (`/hud combat on`).
+  F1 hides it all. It keeps clear of vanilla's HUD (boss bars, effect icons, hotbar, chat, scoreboard
+  sidebar, subtitles, advancement / recipe toasts), the connection pill and the auth banner.
+- Panel style: goal bar (top centre, boss-bar style): status dot, goal text, %, progress bar, the open task
   columns that have tasks and "n/m done" ("finished 2m ago" once the goal is done). With no goal
   yet: "No goal yet · press [Backtick] to give the team one" (punctuation keys are spelled out on
   keycaps; their glyphs are a pixel or two). It keeps clear of the connection pill using the pill's
   real size each frame: narrower next to it, or below it when there is no room (the two-line
   "Reconnecting to the Foreman" pill on a narrow GUI).
-- Decisions badge under it: "2 waiting · press J" with a pulsing clay dot.
+- Panel style: decisions badge under it: "2 waiting · press J" with a pulsing clay dot.
 - Paper toasts for `notify` (top right, under the connection pill, below the goal bar on narrow
   screens): the agent's portrait, "Marlow needs you", two lines, the J hint; they leave early once
   their decision is answered. Hidden while the decision screen is open.
