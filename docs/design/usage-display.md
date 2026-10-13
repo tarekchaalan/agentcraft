@@ -179,6 +179,11 @@ Scheduling (`UsagePoller` in `foreman/src/agents/usage.ts`, owned by `Team`):
   team does not count), 5 min otherwise. Alternatives: only after turns (an idle user
   watching the session window reset would see nothing move), only on a timer (the first
   number arrives a minute late). Both lost.
+- Also triggered by a turn's `rate_limit_event` when it changes a window's status (a
+  warning, the limit itself, allowed again; not the first "allowed" of a window, not
+  repeats), so the display moves when the team starts holding or throttling for the limit
+  (`team.ts` `onRateLimit`). The event never writes `usage` itself: the poller stays its
+  only source.
 - Concurrency: one in-flight poll per engine. A trigger during a poll sets `dirty`; one more
   poll runs when the current one ends. Triggers never queue.
 - Backoff: on `error` the next interval doubles from 60 s up to 30 min; a success resets it.
