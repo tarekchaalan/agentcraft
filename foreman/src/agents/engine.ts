@@ -3,6 +3,7 @@
 // merges, steering, restarts - is the team's (team.ts) and the same for every engine, so a team
 // can mix them (e.g. a Claude lead with Codex workers).
 import type { ChildProcess } from 'node:child_process';
+import type { EffortLevel } from '@anthropic-ai/claude-agent-sdk';
 import type { PolicyContext, Verdict } from '../policy.js';
 import type { Usage } from '../protocol.js';
 import type { AgentTool, TurnHandle } from './tools.js';
@@ -64,6 +65,11 @@ export interface TurnSpec {
   instructions: string;
   /** the engine session to continue (from TurnStats.sessionId), if any */
   resume?: string;
+  /**
+   * the model and effort this turn runs instead of the engine's configured ones: the lead's
+   * fallback while a usage limit of its own model is in force (claude.leadFallback, Claude engine)
+   */
+  modelOverride?: { model: string; effort: EffortLevel };
   /** environment for the agent's process and every command it runs (git safety, identity) */
   env: Record<string, string | undefined>;
   /** directories the agent may write besides cwd (a worktree's git dir, for commits) */

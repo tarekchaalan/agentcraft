@@ -80,6 +80,64 @@ describe('loadConfig argument checking', () => {
   });
 });
 
+describe('claude.leadFallback', () => {
+  const owner = { leadModel: 'claude-fable-5-1', workerModel: 'claude-opus-5-5', effort: 'high', leadEffort: 'high', leadFallback: { model: 'claude-opus-5-5', effort: 'xhigh' } };
+  function withFile(claude: Record<string, unknown> | undefined, args: string[] = [], env: NodeJS.ProcessEnv = {}) {
+    home ??= tempDir();
+    if (claude) fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ claude }));
+    else fs.rmSync(path.join(home, 'config.json'), { force: true });
+    return loadConfig(['--home', home, ...args], env).claude;
+  }
+
+  it('is off by default, and the shipped defaults stay opus / sonnet / medium', () => {
+    const c = load([]).claude;
+    expect(c.leadFallback).toBeUndefined();
+    expect(c).toMatchObject({ leadModel: 'opus', workerModel: 'sonnet', effort: 'medium', leadEffort: 'medium' });
+  });
+
+  it('reads config.json claude.leadFallback {model, effort}; the effort is optional (the lead\'s own then)', () => {
+    expect(withFile(owner)).toMatchObject({ leadModel: 'claude-fable-5-1', leadEffort: 'high', leadFallback: { model: 'claude-opus-5-5', effort: 'xhigh' } });
+    expect(withFile({ leadFallback: { model: 'claude-opus-5-5' } }).leadFallback).toEqual({ model: 'claude-opus-5-5' });
+  });
+
+  it('config.json < env < flags, field by field', () => {
+    const env = { AGENTCRAFT_LEAD_FALLBACK_MODEL: 'sonnet' };
+    expect(withFile(owner, [], env).leadFallback).toEqual({ model: 'sonnet', effort: 'xhigh' });
+    expect(withFile(owner, [], { ...env, AGENTCRAFT_LEAD_FALLBACK_EFFORT: 'max' }).leadFallback).toEqual({ model: 'sonnet', effort: 'max' });
+    expect(withFile(owner, ['--lead-fallback-model', 'claude-haiku-4-5'], env).leadFallback).toEqual({ model: 'claude-haiku-4-5', effort: 'xhigh' });
+    expect(withFile(owner, ['--lead-fallback-effort', 'low'], { AGENTCRAFT_LEAD_FALLBACK_EFFORT: 'max' }).leadFallback).toEqual({ model: 'claude-opus-5-5', effort: 'low' });
+    // flags and env alone, without a config.json
+    expect(withFile(undefined, ['--lead-fallback-model=opus', '--lead-fallback-effort=xhigh']).leadFallback).toEqual({ model: 'opus', effort: 'xhigh' });
+    expect(withFile(undefined, [], { AGENTCRAFT_LEAD_FALLBACK_MODEL: 'opus', AGENTCRAFT_LEAD_FALLBACK_EFFORT: 'high' }).leadFallback).toEqual({ model: 'opus', effort: 'high' });
+  });
+
+  it('--no-lead-fallback-model turns off a fallback set in config.json or the environment', () => {
+    expect(withFile(owner, ['--no-lead-fallback-model']).leadFallback).toBeUndefined();
+    expect(withFile(undefined, ['--no-lead-fallback-model'], { AGENTCRAFT_LEAD_FALLBACK_MODEL: 'opus' }).leadFallback).toBeUndefined();
+    // --no-lead-fallback-effort: the lead's own effort
+    expect(withFile(owner, ['--no-lead-fallback-effort']).leadFallback).toEqual({ model: 'claude-opus-5-5' });
+  });
+
+  it('validates the effort like the other efforts, wherever it comes from, and refuses one without a model', () => {
+    expect(() => withFile({ leadFallback: { model: 'opus', effort: 'extra' } })).toThrow(/unknown effort "extra" \(use low, medium, high, xhigh, max\)/);
+    expect(() => withFile(undefined, ['--lead-fallback-model', 'opus'], { AGENTCRAFT_LEAD_FALLBACK_EFFORT: 'hi' })).toThrow(/unknown effort "hi"/);
+    expect(() => withFile(undefined, ['--lead-fallback-model', 'opus', '--lead-fallback-effort', 'x-high'])).toThrow(/unknown effort "x-high"/);
+    expect(() => withFile(undefined, ['--lead-fallback-model', 'opus', '--lead-fallback-effort'])).toThrow(/unknown effort "true"/);
+    // a typo is caught even when the model comes from nowhere
+    expect(() => withFile(undefined, ['--lead-fallback-effort', 'xhigh'])).toThrow(/a lead fallback effort needs a fallback model/);
+    expect(() => withFile({ leadFallback: { effort: 'xhigh' } })).toThrow(/needs a fallback model/);
+    for (const v of ['xhigh', 'max', 'low']) expect(withFile(undefined, ['--lead-fallback-model', 'opus', '--lead-fallback-effort', v]).leadFallback?.effort).toBe(v);
+  });
+
+  it('refuses a claude.leadFallback that is not {model, effort?}', () => {
+    expect(() => withFile({ leadFallback: 'claude-opus-5-5' })).toThrow(/claude\.leadFallback must be an object/);
+    expect(() => withFile({ leadFallback: ['claude-opus-5-5'] })).toThrow(/must be an object/);
+    expect(() => withFile({ leadFallback: null })).toThrow(/must be an object/);
+    expect(() => withFile({ leadFallback: { model: 5 } })).toThrow(/leadFallback\.model must be a model id/);
+    expect(() => withFile({ leadFallback: { model: ' ' } })).toThrow(/leadFallback\.model must be a model id/);
+  });
+});
+
 describe('use-claude-login', () => {
   it('comes from --use-claude-login, AGENTCRAFT_USE_CLAUDE_LOGIN or config.json claude.useClaudeLogin (not a top-level key)', () => {
     home = tempDir();

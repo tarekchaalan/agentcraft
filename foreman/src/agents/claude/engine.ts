@@ -250,8 +250,9 @@ export class ClaudeEngine implements Engine {
     const extra = instructionsBlock(this.cfg.context, spec.repoPath, userName(), undefined, (m) => this.warnOnce(m));
     const options: Options = {
       cwd,
-      model: this.model(role),
-      effort: role === 'lead' ? this.cfg.leadEffort : this.cfg.effort,
+      // the lead's fallback (claude.leadFallback) while its own model's usage limit is in force
+      model: spec.modelOverride?.model ?? this.model(role),
+      effort: spec.modelOverride?.effort ?? (role === 'lead' ? this.cfg.leadEffort : this.cfg.effort),
       maxTurns: role === 'lead' ? this.cfg.maxTurnsLead : this.cfg.maxTurnsWorker,
       settingSources: [],
       // only the servers passed here: no .mcp.json, no plugin servers, no claude.ai connectors

@@ -91,9 +91,11 @@ most ~100 ms of state, and interrupted agent turns resume on the next start.
 | `--toast-silent` | | toast without sound |
 | `--model`, `--lead-model`, `--worker-model` | lead `opus`, workers `sonnet` | any model id/alias the CLI accepts |
 | `--effort low..max` | `medium` | |
+| `--lead-fallback-model` / `AGENTCRAFT_LEAD_FALLBACK_MODEL` / config `claude.leadFallback.model` | none | the lead's model while a usage limit of its own model is in force, e.g. a Fable lead at the Fable limit (see Lead fallback); `--no-lead-fallback-model` turns off one set in config.json |
+| `--lead-fallback-effort` / `AGENTCRAFT_LEAD_FALLBACK_EFFORT` / config `claude.leadFallback.effort` | the lead's effort | its effort, `low..max` |
 | `--workers 3` or `--workers kit,wren` | `juniper,kit,wren` | team (others stay "off shift") |
 | `--max-concurrent` | `3` | workers running at once |
-| `--throttle-concurrent` | `1` | workers at once while your plan (claude.ai login) reports a usage warning; at the limit itself nobody starts a turn until it resets, and interrupted turns resume then |
+| `--throttle-concurrent` | `1` | workers at once while your plan (claude.ai login) reports a usage warning; at the limit itself nobody starts a turn until it resets, and interrupted turns resume then (except a lead with a fallback model, see Lead fallback) |
 | `--max-turns`, `--max-budget <usd>` | 40 lead / 80 worker, none | per turn caps |
 | `--ci "<cmd>"` | detected (`npm test`, `cargo test`, ...) | run after each task |
 | `--lead-read-commands "<cmd>,..."` | none | read commands the lead runs without asking, by prefix: `"bd show,gh issue view"` lets it read your issue tracker |
@@ -105,6 +107,33 @@ most ~100 ms of state, and interrupted agent turns resume on the next start.
 | sim: `--speed`, `--seed`, `--autostart`, `--showcase [late]`, `--auto-answer`, `--no-ambient` | | |
 
 `<home>/config.json` can hold the same settings (`{"backend":"claude","claude":{"workers":["kit","wren"]}}`).
+
+### Lead fallback (`claude.leadFallback`)
+
+With your Claude login, some models have a weekly limit of their own besides the plan's 5-hour and
+weekly limits (the CLI reports it as e.g. the "Fable limit"). By default a limit stops everyone until
+it resets. With a fallback, a lead whose own model reaches its own limit switches models instead:
+
+```json
+{ "claude": {
+    "leadModel": "claude-fable-5-1", "leadEffort": "high",
+    "leadFallback": { "model": "claude-opus-5-5", "effort": "xhigh" } } }
+```
+
+- The refused turn continues at once on the fallback model and effort (the same job, its session
+  resumed). Nobody else waits, and workers keep their own model and limits.
+- Which limit: the rate-limit type of the refusal (`seven_day_overage_included` is the Fable limit,
+  `seven_day_opus` and `seven_day_sonnet` those models'), else the CLI's "You've hit your Fable limit"
+  message. An account-wide limit (5-hour, weekly, usage credits) holds everyone as before: another
+  model would not get past it. So does a limit the fallback model reaches too, and a worker's limit.
+- Back: when the limit resets (its reset time; without one, the reset of that model's weekly window in
+  the usage poll, else a wait from 5 minutes doubling to an hour), the lead's next turn runs its own
+  model and effort again.
+- Shown: a feed line ("Marlow switched to Opus 5.5 (xhigh): Fable limit reached, back at 14:05", and
+  "Marlow is back on Fable 5.1 (high): ..."), the lead's nameplate model, the banner
+  (`foreman.status.message`: "lead Opus 5.5 while Fable is limited") and the Foreman log.
+- The state is saved: after a restart the lead stays on the fallback until the reset, unless the
+  config no longer names a fallback for that lead model. Claude lead only (a Codex lead has none).
 
 ### Permissions and subagents (`claude.permissions`, `claude.subagents`)
 

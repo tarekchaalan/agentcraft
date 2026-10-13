@@ -15,11 +15,23 @@ export const FOREMAN_VERSION = '0.1.0';
 /** Repo root of the AgentCraft project (foreman/src/config.ts -> ../..). */
 export const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
+/**
+ * What the lead runs while a usage limit of its own model is in force (claude.ai login): e.g. a
+ * Fable lead continues on Opus when the Fable weekly limit is reached, instead of waiting for it.
+ */
+export interface LeadFallback {
+  model: string;
+  /** default: the lead's effort */
+  effort?: EffortLevel;
+}
+
 export interface ClaudeConfig {
   leadModel: string;
   workerModel: string;
   effort: EffortLevel;
   leadEffort: EffortLevel;
+  /** claude.leadFallback: the lead's model while its own model's usage limit is in force (default: none, the lead waits) */
+  leadFallback?: LeadFallback;
   maxTurnsLead: number;
   maxTurnsWorker: number;
   /** max workers running a turn at the same time */
@@ -261,11 +273,37 @@ function effort(v: unknown, d: EffortLevel): EffortLevel {
   throw new Error(`unknown effort "${String(v)}" (use ${EFFORTS.join(', ')})`);
 }
 
+/**
+ * claude.leadFallback {model, effort?} < AGENTCRAFT_LEAD_FALLBACK_MODEL / _EFFORT < --lead-fallback-model /
+ * --lead-fallback-effort, each field on its own. `--no-lead-fallback-model` turns off a fallback set elsewhere.
+ */
+function leadFallback(flags: Flags, env: NodeJS.ProcessEnv, file: unknown): LeadFallback | undefined {
+  if (file !== undefined && (file === null || typeof file !== 'object' || Array.isArray(file))) {
+    throw new Error('config.json claude.leadFallback must be an object like {"model": "claude-opus-5-5", "effort": "xhigh"}');
+  }
+  const f = (file ?? {}) as Record<string, unknown>;
+  if (f.model !== undefined && (typeof f.model !== 'string' || !f.model.trim())) throw new Error('config.json claude.leadFallback.model must be a model id or alias, e.g. "claude-opus-5-5"');
+  const off = flags['lead-fallback-model'] === false;
+  const model = off ? undefined : (str(flags['lead-fallback-model']) ?? str(env.AGENTCRAFT_LEAD_FALLBACK_MODEL) ?? str(f.model))?.trim();
+  // `--no-lead-fallback-effort`: the lead's own effort
+  const effortFlag = flags['lead-fallback-effort'];
+  const effortRaw = effortFlag === false ? undefined : (effortFlag ?? str(env.AGENTCRAFT_LEAD_FALLBACK_EFFORT) ?? f.effort);
+  // validated even when no model is set, so a typo never goes unnoticed
+  const fallbackEffort = effortRaw === undefined ? undefined : effort(effortRaw, 'medium');
+  if (!model) {
+    if (fallbackEffort && !off) {
+      throw new Error('a lead fallback effort needs a fallback model (--lead-fallback-model, AGENTCRAFT_LEAD_FALLBACK_MODEL or config.json claude.leadFallback.model)');
+    }
+    return undefined;
+  }
+  return { model, ...(fallbackEffort ? { effort: fallbackEffort } : {}) };
+}
+
 /** Every flag loadConfig reads (the `no-` prefix is stripped by parseFlags). */
 export const KNOWN_FLAGS = new Set([
   'home', 'backend', 'profile', 'user-name', 'use-claude-login', 'repo', 'workers', 'model', 'port', 'goal', 'autostart', 'reset', 'notify',
   'toast-silent', 'debug', 'quiet', 'allow-browser-origins', 'repo-poll-ms', 'merge-style', 'sign-merges',
-  'lead-model', 'worker-model', 'effort', 'lead-effort', 'max-turns', 'max-turns-lead', 'max-turns-worker',
+  'lead-model', 'worker-model', 'effort', 'lead-effort', 'lead-fallback-model', 'lead-fallback-effort', 'max-turns', 'max-turns-lead', 'max-turns-worker',
   'max-concurrent', 'throttle-concurrent', 'ci', 'max-budget', 'resume', 'lead-review', 'speed', 'seed', 'showcase', 'auto-answer',
   'ambient', 'lead-read-commands', 'lead-engine', 'worker-engine', 'engines', 'codex-path', 'codex-model', 'codex-lead-model',
   'codex-worker-model', 'codex-effort', 'codex-lead-effort', 'usage',
@@ -336,6 +374,7 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
       : ['juniper', 'kit', 'wren'];
 
   const model = str(flags.model);
+  const fallback = leadFallback(flags, env, fileClaude.leadFallback);
   const cfg: Config = {
     backend,
     userName: (str(pick('user-name', 'AGENTCRAFT_USER_NAME')) ?? str(file.userName))?.trim().slice(0, 40) || defaultUserName(),
@@ -363,6 +402,7 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
       workerModel: str(flags['worker-model']) ?? model ?? str(env.AGENTCRAFT_WORKER_MODEL) ?? str(fileClaude.workerModel) ?? 'sonnet',
       effort: effort(flags.effort ?? fileClaude.effort, 'medium'),
       leadEffort: effort(flags['lead-effort'] ?? flags.effort ?? fileClaude.leadEffort, 'medium'),
+      ...(fallback ? { leadFallback: fallback } : {}),
       maxTurnsLead: num(flags['max-turns-lead'] ?? flags['max-turns'] ?? fileClaude.maxTurnsLead, 40),
       maxTurnsWorker: num(flags['max-turns-worker'] ?? flags['max-turns'] ?? fileClaude.maxTurnsWorker, 80),
       maxConcurrent: Math.max(1, num(flags['max-concurrent'] ?? fileClaude.maxConcurrent, 3)),
@@ -443,6 +483,13 @@ usage: npm run start -- [options]
   --model <m>              model for lead and workers (default lead: opus, workers: sonnet)
   --lead-model <m> / --worker-model <m>
   --effort low|medium|high|xhigh|max   (default medium)
+  --lead-fallback-model <m>  the lead's model while a usage limit of its own model is in force
+                           (claude.ai login, e.g. a Fable lead at the Fable limit), instead of
+                           waiting for the reset; back on --lead-model when it resets (default: none;
+                           env AGENTCRAFT_LEAD_FALLBACK_MODEL, config.json claude.leadFallback.model;
+                           --no-lead-fallback-model turns off one set there)
+  --lead-fallback-effort <e>  its effort (default: the lead's; env AGENTCRAFT_LEAD_FALLBACK_EFFORT,
+                           config.json claude.leadFallback.effort)
   --max-turns <n>          turn cap per session run (default lead 40 / worker 80)
   --workers <n|ids>        team size or comma list (default juniper,kit,wren)
   --max-concurrent <n>     workers running at once (default 3)

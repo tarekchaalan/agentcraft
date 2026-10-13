@@ -18,3 +18,34 @@ export function resetsAtMs(v: unknown): number | undefined {
   if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return undefined;
   return v < 1e12 ? v * 1000 : v;
 }
+
+// ---- which models a limit applies to (claude.ai plan limits, see claude.leadFallback) ---------
+
+const FAMILIES = new Set(['opus', 'sonnet', 'haiku', 'fable']);
+
+/**
+ * The model family a plan limit is specific to, from the rate-limit type the Claude CLI reports
+ * (SDKRateLimitInfo.rateLimitType): "seven_day_opus" -> "opus", "seven_day_sonnet" -> "sonnet",
+ * "seven_day_overage_included" -> "fable" (the weekly window of the plan's overage-included models,
+ * which the CLI calls the "Fable limit"). Undefined for a limit of the whole account (five_hour,
+ * seven_day, overage) and for anything unknown: switching models would not get past those.
+ */
+export function limitModelFamily(type: string | undefined): string | undefined {
+  if (type === 'seven_day_overage_included') return 'fable';
+  const m = /^seven_day_([a-z]+)$/.exec(type ?? '');
+  return m && FAMILIES.has(m[1]!) ? m[1] : undefined;
+}
+
+/**
+ * The model family a limit message names, for a turn that ended without a typed report: "You've hit
+ * your Fable limit · resets 3pm" -> "fable". The session, weekly and credit limits name none.
+ */
+export function limitFamilyFromText(text: string): string | undefined {
+  const name = /\bhit your (\w+) limit\b/i.exec(text)?.[1]?.toLowerCase();
+  return name && FAMILIES.has(name) ? name : undefined;
+}
+
+/** "claude-fable-5-1", "fable", "opus[1m]" -> their family; undefined when none is named ("default", "opusplan"). */
+export function modelFamily(model: string | undefined): string | undefined {
+  return /(?:^|[^a-z])(opus|sonnet|haiku|fable)(?![a-z])/i.exec(model ?? '')?.[1]?.toLowerCase();
+}

@@ -23,7 +23,7 @@ import type { ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { ClaudeConfig } from '../config.js';
+import type { ClaudeConfig, LeadFallback } from '../config.js';
 import { FOREMAN_VERSION } from '../config.js';
 import { ClientError, type Backend, type Foreman } from '../foreman.js';
 import { withGitSafety } from '../gitsafety.js';
@@ -38,8 +38,8 @@ import { descendantsOf, killSnapshot, killTree, orphansOf, processTable, type Pr
 import { truncate } from '../util/text.js';
 import { leadSystemPrompt, planPrompt, RESUME_PROMPT, reviewPrompt, workerSystemPrompt, workPrompt } from './prompts.js';
 import { fetchPulls, githubOrigin, prRefs, pullBriefs, type PullRequest } from '../pulls.js';
-import type { AuthCheck, Engine, EngineId, PermissionGate, RateLimitReport, Role, TurnStats } from './engine.js';
-import { limitFromText } from './limits.js';
+import type { AuthCheck, Engine, EngineId, PermissionGate, RateLimitReport, Role, TurnSpec, TurnStats } from './engine.js';
+import { limitFamilyFromText, limitFromText, limitModelFamily, modelFamily } from './limits.js';
 import { agentTools, type ToolHooks, type TurnHandle } from './tools.js';
 import { modelLabel } from './models.js';
 import { UsagePoller } from './usage.js';
@@ -83,6 +83,27 @@ interface ClaudeState {
   limit?: { until: number; type?: string };
   /** the plan warned about usage: fewer workers at once until `until` */
   throttle?: { until: number; type?: string };
+  /**
+   * the lead's own model (`model`, claude.leadModel) hit a usage limit of that model's family
+   * (`family`, e.g. "fable"): the lead runs claude.leadFallback until `until`, then its own model
+   * again; nobody else waits. `guessed`: the limit did not say when it resets (a usage poll may).
+   */
+  leadFallback?: { until: number; model: string; family: string; type?: string; guessed?: boolean };
+}
+
+/** Which turn a usage limit came from (the lead's fallback applies only to the lead on its own model). */
+interface TurnOrigin {
+  agentId: string;
+  /** the turn ran the lead's fallback */
+  fallback: boolean;
+  /** the model the turn reported (e.g. "claude-fable-5-1"), if it did */
+  reported?: string;
+}
+
+/** The model a turn runs; `override`: the lead's fallback model and effort, which the engine runs instead of its own. */
+interface TurnModel {
+  model: string;
+  override?: NonNullable<TurnSpec['modelOverride']>;
 }
 
 interface Running {
@@ -99,6 +120,8 @@ interface Running {
   tree?: Promise<ProcEntry[] | undefined>;
   /** the (single) clean-up of this turn's processes, once started */
   reaping?: Promise<void>;
+  /** the turn runs the lead's fallback model */
+  fallback?: boolean;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -109,6 +132,8 @@ function clock(ms: number): string {
   const hm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   return d.toDateString() === new Date().toDateString() ? hm : `${d.toLocaleDateString([], { weekday: 'short' })} ${hm}`;
 }
+
+const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 function alive(child: ChildProcess | undefined): child is ChildProcess {
   return !!child && child.exitCode === null && child.signalCode === null;
@@ -189,6 +214,8 @@ export class TeamBackend implements Backend {
   /** fires when a usage limit / throttle window ends */
   private limitTimer: NodeJS.Timeout | undefined;
   private limitBackoffMs = LIMIT_BACKOFF_MS;
+  /** the lead's fallback after a limit of its own model that did not say when it resets (doubles per hit) */
+  private fallbackBackoffMs = LIMIT_BACKOFF_MS;
   /** the last rate-limit status each plan window reported (a change refreshes the usage display) */
   private rateLimitStatus = new Map<string, RateLimitReport['status']>();
   private readonly pullFetcher: PullFetcher;
@@ -242,14 +269,15 @@ export class TeamBackend implements Backend {
   }
 
   /**
-   * Every agent's nameplate shows its engine and model: the configured model until a turn reports
-   * the real one (onModel). Off-shift agents too: it is what they would run when spawned.
+   * Every agent's nameplate shows its engine and model: the configured model (the lead's fallback
+   * while it runs it) until a turn reports the real one (onModel). Off-shift agents too: it is what
+   * they would run when spawned.
    */
   private showEngines(): void {
     for (const a of this.fm.agents()) {
       const engine = this.engineFor(a.id);
       const reported = this.reportedModels.get(a.id);
-      const model = (reported?.engine === engine.id ? reported.label : undefined) ?? modelLabel(engine.model(a.id === LEAD ? 'lead' : 'worker')) ?? engine.label;
+      const model = (reported?.engine === engine.id ? reported.label : undefined) ?? modelLabel(this.turnModel(a.id, a.id === LEAD ? 'lead' : 'worker', engine).model) ?? engine.label;
       this.fm.setAgent(a.id, { engine: engine.id, model });
     }
   }
@@ -259,15 +287,21 @@ export class TeamBackend implements Backend {
     return [...new Set([LEAD, ...this.team].map((id) => this.engineFor(id)))];
   }
 
-  /** e.g. "Claude (lead opus, workers sonnet)" or "Claude lead opus · Codex workers gpt-5" */
+  /**
+   * e.g. "Claude (lead opus, workers sonnet)" or "Claude lead opus · Codex workers gpt-5"; on the
+   * lead's fallback "Claude (lead Opus 5.5 while Fable is limited, workers sonnet)"
+   */
   private teamLabel(): string {
     const lead = this.engineFor(LEAD);
     const workers = [...new Set(this.team.map((w) => this.engineFor(w)))];
     // aliases as configured ("opus"), full model ids as display names ("claude-opus-5-5" -> "Opus 5.5")
-    const m = (e: Engine, role: Role) => (/^[a-z]+$/.test(e.model(role)) ? e.model(role) : (modelLabel(e.model(role)) ?? e.model(role)));
-    if (!workers.length || (workers.length === 1 && workers[0] === lead)) return `${lead.label} (lead ${m(lead, 'lead')}, workers ${m(lead, 'worker')})`;
-    if (workers.length === 1) return `${lead.label} lead ${m(lead, 'lead')} · ${workers[0]!.label} workers ${m(workers[0]!, 'worker')}`;
-    return `${lead.label} lead ${m(lead, 'lead')} · ${this.team.map((w) => `${this.fm.nameOf(w)} ${this.engineFor(w).label}`).join(', ')}`;
+    const name = (model: string) => (/^[a-z]+$/.test(model) ? model : (modelLabel(model) ?? model));
+    const m = (e: Engine, role: Role) => name(e.model(role));
+    const fb = this.onFallback() ? this.st.leadFallback : undefined;
+    const leadModel = fb ? `${name(this.turnModel(LEAD, 'lead', lead).model)} while ${capital(fb.family)} is limited` : m(lead, 'lead');
+    if (!workers.length || (workers.length === 1 && workers[0] === lead)) return `${lead.label} (lead ${leadModel}, workers ${m(lead, 'worker')})`;
+    if (workers.length === 1) return `${lead.label} lead ${leadModel} · ${workers[0]!.label} workers ${m(workers[0]!, 'worker')}`;
+    return `${lead.label} lead ${leadModel} · ${this.team.map((w) => `${this.fm.nameOf(w)} ${this.engineFor(w).label}`).join(', ')}`;
   }
 
   private isStopped(agentId: string): boolean {
@@ -293,6 +327,7 @@ export class TeamBackend implements Backend {
     // the spend survives restarts: every session's cost is persisted, so the total is their sum
     const spent = Object.values(this.fm.store.data.sessions).reduce((sum, s) => sum + (s.costUsd || 0), 0);
     if (spent > 0) this.fm.setStatus({ costUsd: Math.round(spent * 1000) / 1000 });
+    this.startLeadFallback();
     this.showEngines();
     const authed = await this.checkAuth();
     this.showEngines(); // the auth check may have learned the configured model
@@ -346,7 +381,10 @@ export class TeamBackend implements Backend {
     if (!engine?.usage) return;
     this.usagePoller ??= new UsagePoller({
       poll: () => engine.usage!(),
-      publish: (usage) => this.fm.setStatus({ usage }),
+      publish: (usage) => {
+        this.fm.setStatus({ usage });
+        this.refineFallbackReset();
+      },
       busy: () => this.usageBusy(),
       log: this.fm.log,
     });
@@ -558,8 +596,8 @@ export class TeamBackend implements Backend {
     return t && now < t.until ? Math.min(this.cfg.maxConcurrent, this.cfg.throttleConcurrent) : this.cfg.maxConcurrent;
   }
 
-  /** A live usage report from a running turn. */
-  protected onRateLimit(r: RateLimitReport): void {
+  /** A live usage report from a running turn (`from`: whose turn, for the lead's fallback). */
+  protected onRateLimit(r: RateLimitReport, from?: TurnOrigin): void {
     // foreman.status.usage has one source, the usage poller: when a window's limit status changes
     // (a warning, the limit itself, allowed again) it fetches fresh numbers now instead of at its
     // next tick. Only changes: these reports come with every turn, and each poll is a CLI process.
@@ -569,8 +607,12 @@ export class TeamBackend implements Backend {
       this.rateLimitStatus.set(window, r.status);
       if (before !== undefined || r.status !== 'allowed') this.usagePoller?.trigger();
     }
-    if (r.status === 'rejected') this.setLimit(r.resetsAt, r.type);
-    else if (r.status === 'allowed_warning') {
+    if (r.status === 'rejected') {
+      // the lead's own model at its own limit, with a fallback configured: the lead switches models
+      // and nobody waits (the turn ends refused; runJob continues it on the fallback)
+      if (from && this.switchLeadToFallback(from, { ...(r.type ? { type: r.type } : {}), ...(r.resetsAt ? { resetsAt: r.resetsAt } : {}) })) return;
+      this.setLimit(r.resetsAt, r.type);
+    } else if (r.status === 'allowed_warning') {
       const until = r.resetsAt ?? Date.now() + THROTTLE_DEFAULT_MS;
       const prev = this.st.throttle;
       if (prev && prev.until >= until) return;
@@ -601,12 +643,12 @@ export class TeamBackend implements Backend {
     this.armLimitTimer();
   }
 
-  /** Wake up when the earliest limit/throttle window ends. */
+  /** Wake up when the earliest limit/throttle/lead-fallback window ends. */
   private armLimitTimer(): void {
     if (this.limitTimer) clearTimeout(this.limitTimer);
     this.limitTimer = undefined;
     const now = Date.now();
-    const ends = [this.st.limit?.until, this.st.throttle?.until].filter((t): t is number => typeof t === 'number' && t > now);
+    const ends = [this.st.limit?.until, this.st.throttle?.until, this.st.leadFallback?.until].filter((t): t is number => typeof t === 'number' && t > now);
     if (!ends.length) {
       this.liftExpired();
       return;
@@ -635,10 +677,185 @@ export class TeamBackend implements Backend {
       delete this.st.throttle;
       changed = true;
     }
+    if (this.st.leadFallback && now >= this.st.leadFallback.until) {
+      this.endLeadFallback();
+      changed = true;
+    }
     if (changed) {
       this.fm.store.markDirty();
       this.tick();
     }
+  }
+
+  // ---- the lead's fallback model (claude.leadFallback) ---------------------------------------
+
+  /** claude.leadFallback, when it can apply: the lead runs on the Claude engine (the plan limits are Claude's). */
+  private fallbackConfig(): LeadFallback | undefined {
+    return this.cfg.leadFallback && this.engineFor(LEAD).id === 'claude' ? this.cfg.leadFallback : undefined;
+  }
+
+  /** The lead runs its fallback now: a limit of its own model is in force (and the config still asks for it). */
+  private onFallback(now = Date.now()): boolean {
+    const f = this.st.leadFallback;
+    return !!f && now < f.until && !!this.fallbackConfig() && f.model === this.cfg.leadModel;
+  }
+
+  /** The model an agent's next turn runs; for the lead on its fallback, the model and effort the engine runs instead. */
+  private turnModel(agentId: string, role: Role, engine: Engine): TurnModel {
+    const fb = agentId === LEAD ? this.fallbackConfig() : undefined;
+    if (fb && this.onFallback()) return { model: fb.model, override: { model: fb.model, effort: fb.effort ?? this.cfg.leadEffort } };
+    return { model: engine.model(role) };
+  }
+
+  /** "Opus 5.5 (xhigh)" */
+  private fallbackLabel(fb: LeadFallback): string {
+    return `${modelLabel(fb.model) ?? fb.model} (${fb.effort ?? this.cfg.leadEffort})`;
+  }
+
+  /** The banner line: the team label, unless the auth failed or a usage limit holds everyone (those messages stay). */
+  private showTeamLabel(): void {
+    if (this.authFailed || this.limited() || this.fm.status.auth !== 'ok') return;
+    this.fm.setStatus({ message: this.teamLabel() });
+  }
+
+  /** When the usage poller last saw a model family's weekly window ("weekly:fable") reset, if that is still ahead. */
+  private usageReset(family: string, now = Date.now()): number | undefined {
+    const w = this.fm.status.usage?.windows.find((x) => x.id === `weekly:${family}` || x.id.startsWith(`weekly:${family}-`));
+    const at = w?.resetsAt ? Date.parse(w.resetsAt) : Number.NaN;
+    return Number.isFinite(at) && at > now ? at : undefined;
+  }
+
+  /**
+   * The lead's turn on its own model hit a usage limit. When that limit is the model's own (its
+   * weekly window, e.g. the Fable limit; not the account's 5-hour, weekly or credit limit) and
+   * claude.leadFallback names a model outside it, the lead switches to the fallback until the limit
+   * resets and nobody waits. True when the lead is on its fallback for this limit, also when an
+   * earlier report of it already switched it (the live report, then the end of the same turn).
+   */
+  private switchLeadToFallback(from: TurnOrigin, limit: { type?: string; resetsAt?: number; text?: string }): boolean {
+    const fb = this.fallbackConfig();
+    if (!fb || from.agentId !== LEAD || from.fallback) return false;
+    // a typed report decides; the message only when there is none
+    const family = limit.type ? limitModelFamily(limit.type) : limitFamilyFromText(limit.text ?? '');
+    // the lead's own model as configured, else as its turn reported it (an alias such as "default")
+    const own = modelFamily(this.cfg.leadModel) ?? modelFamily(from.reported);
+    if (!family || family !== own || modelFamily(fb.model) === family) return false;
+    const now = Date.now();
+    const prev = this.st.leadFallback;
+    if (prev && this.onFallback(now)) {
+      if (limit.resetsAt && limit.resetsAt > prev.until) {
+        prev.until = limit.resetsAt;
+        delete prev.guessed;
+        this.fm.store.markDirty();
+        this.armLimitTimer();
+      }
+      return true;
+    }
+    const window = limit.resetsAt ? undefined : this.usageReset(family, now);
+    const until = limit.resetsAt ?? window ?? now + this.fallbackBackoffMs;
+    const guessed = !limit.resetsAt && !window;
+    if (guessed) this.fallbackBackoffMs = Math.min(LIMIT_BACKOFF_MAX_MS, this.fallbackBackoffMs * 2);
+    this.st.leadFallback = { until, model: this.cfg.leadModel, family, ...(limit.type ? { type: limit.type } : {}), ...(guessed ? { guessed: true } : {}) };
+    this.fm.store.markDirty();
+    const what = `${capital(family)} limit reached`;
+    this.fm.log.warn(
+      `${what}: ${this.fm.nameOf(LEAD)} switches from ${this.cfg.leadModel} to ${fb.model} (${fb.effort ?? this.cfg.leadEffort}) until ${new Date(until).toISOString()}` +
+        `${guessed ? ' (the limit gave no reset time; it tries its own model again then)' : ''}`,
+    );
+    this.fm.bus.feed('system', `${this.fm.nameOf(LEAD)} switched to ${this.fallbackLabel(fb)}: ${what}, back at ${clock(until)}`, { agentId: LEAD });
+    // the nameplate shows the fallback now, then what its first turn reports
+    this.reportedModels.delete(LEAD);
+    this.showEngines();
+    this.showTeamLabel();
+    this.armLimitTimer();
+    return true;
+  }
+
+  /** The lead's own model's limit has reset (or the config no longer asks for a fallback): its next turn runs it again. */
+  private endLeadFallback(): void {
+    const f = this.st.leadFallback;
+    if (!f) return;
+    delete this.st.leadFallback;
+    this.fm.store.markDirty();
+    if (f.model !== this.cfg.leadModel || !this.fallbackConfig()) return;
+    const own = `${modelLabel(this.cfg.leadModel) ?? this.cfg.leadModel} (${this.cfg.leadEffort})`;
+    this.fm.log.info(`${capital(f.family)} limit reset: ${this.fm.nameOf(LEAD)} is back on ${this.cfg.leadModel} from its next turn`);
+    this.fm.bus.feed('system', `${this.fm.nameOf(LEAD)} is back on ${own}: the ${capital(f.family)} limit reset`, { agentId: LEAD });
+    // a fallback turn still running keeps its nameplate until it ends (runJob shows the own model then)
+    if (!this.running.get(LEAD)?.fallback) {
+      this.reportedModels.delete(LEAD);
+      this.showEngines();
+    }
+    this.showTeamLabel();
+  }
+
+  /** At start: a fallback persisted before a restart applies only if the config still asks for it, for the same lead model. */
+  private startLeadFallback(): void {
+    const fb = this.fallbackConfig();
+    if (this.cfg.leadFallback && !fb) this.fm.log.debug('claude.leadFallback: the lead runs on Codex, so it has no fallback model');
+    else if (fb && modelFamily(fb.model) && modelFamily(fb.model) === modelFamily(this.cfg.leadModel)) {
+      this.fm.log.warn(`claude.leadFallback: ${fb.model} shares ${this.cfg.leadModel}'s usage limit, so the lead never switches to it`);
+    } else if (fb) this.fm.log.info(`lead fallback: ${fb.model} (${fb.effort ?? this.cfg.leadEffort}) while ${this.cfg.leadModel} is at a usage limit of its own`);
+    const f = this.st.leadFallback;
+    if (!f) return;
+    if (!fb || f.model !== this.cfg.leadModel) {
+      this.fm.log.info(`lead fallback from before the restart dropped (the config no longer asks for it for ${f.model})`);
+      delete this.st.leadFallback;
+      this.fm.store.markDirty();
+    } else if (this.onFallback()) {
+      this.fm.log.info(`${capital(f.family)} limit: ${this.fm.nameOf(LEAD)} stays on ${fb.model} until ${new Date(f.until).toISOString()}`);
+    }
+  }
+
+  /** A usage poll came in: a fallback whose limit gave no reset time takes the window's reset (e.g. weekly:fable). */
+  private refineFallbackReset(): void {
+    const f = this.st.leadFallback;
+    if (!f?.guessed || !this.onFallback()) return;
+    const at = this.usageReset(f.family);
+    if (!at) return;
+    f.until = at;
+    delete f.guessed;
+    this.fm.store.markDirty();
+    this.fm.log.info(`${capital(f.family)} limit resets ${new Date(at).toISOString()} (usage): ${this.fm.nameOf(LEAD)} returns to ${f.model} then`);
+    this.showTeamLabel();
+    this.armLimitTimer();
+  }
+
+  /**
+   * The lead's turn on its own model was refused by that model's own limit and the lead now runs its
+   * fallback: the same job continues right away on the fallback (its session resumed), instead of
+   * waiting for the reset (holdForLimit). False when that does not apply.
+   */
+  private continueOnFallback(job: Job, stats: TurnStats, from: TurnOrigin): boolean {
+    // a limit that holds everyone (another agent's, or the account's) wins: the job waits for it
+    if (from.agentId !== LEAD || from.fallback || this.limited()) return false;
+    const rejected = stats.rateLimit?.status === 'rejected' ? stats.rateLimit : undefined;
+    const switched =
+      this.onFallback() ||
+      this.switchLeadToFallback(from, {
+        ...(rejected?.type ? { type: rejected.type } : {}),
+        ...(rejected?.resetsAt ? { resetsAt: rejected.resetsAt } : {}),
+        text: [stats.resultText ?? '', ...stats.errors].join(' '),
+      });
+    const fb = this.fallbackConfig();
+    const f = this.st.leadFallback;
+    if (!switched || !fb || !f) return false;
+    const model = modelLabel(fb.model) ?? fb.model;
+    const next = this.continuation(
+      job,
+      `The ${capital(f.family)} usage limit stopped your last turn; you continue on ${model} until it resets. Re-check where you were (the task board, your messages) and continue your current job.`,
+    );
+    this.fm.setAgent(LEAD, { state: 'thinking', activity: `continuing on ${model}` });
+    this.fm.agentLog(LEAD, 'text', `${capital(f.family)} limit: this ${job.kind} continues on ${this.fallbackLabel(fb)}`);
+    const q = this.queues.get(LEAD) ?? [];
+    q.unshift(next);
+    this.queues.set(LEAD, q);
+    return true;
+  }
+
+  /** A job again after a usage limit refused its turn: its session resumed with `prompt`, or (no session yet) the same job from the start. */
+  private continuation(job: Job, prompt: string): Job {
+    return this.fm.store.data.sessions[job.sessionKey]?.sessionId ? { ...job, fresh: false, resumed: true, prompt } : job;
   }
 
   /**
@@ -647,10 +864,7 @@ export class TeamBackend implements Backend {
    */
   private holdForLimit(job: Job, stats: TurnStats): void {
     if (!this.limited()) this.setLimit(stats.rateLimit?.resetsAt, stats.rateLimit?.type);
-    const hasSession = !!this.fm.store.data.sessions[job.sessionKey]?.sessionId;
-    const next: Job = hasSession
-      ? { ...job, fresh: false, resumed: true, prompt: 'A usage limit stopped your last turn; it has reset now. Re-check where you were (your worktree, the task board) and continue your current job.' }
-      : job;
+    const next = this.continuation(job, 'A usage limit stopped your last turn; it has reset now. Re-check where you were (your worktree, the task board) and continue your current job.');
     const until = this.st.limit?.until;
     this.fm.setAgent(job.agentId, { state: 'blocked', activity: `usage limit - resumes ${until ? clock(until) : 'later'}` });
     this.fm.agentLog(job.agentId, 'error', `usage limit: this ${job.kind} resumes when it resets${until ? ` (${clock(until)})` : ''}`);
@@ -959,6 +1173,10 @@ export class TeamBackend implements Backend {
     this.usagePoller?.reschedule(); // a turn runs: the busy cadence
     let stats: TurnStats | undefined;
     let cwd = '';
+    /** the model this turn runs (the lead's fallback, or the engine's configured model) */
+    let sel: TurnModel | undefined;
+    /** the model the turn reported running */
+    let reported: string | undefined;
     try {
       // a paused/stopped turn of this agent may still be winding down: never run two CLIs on one
       // agent (they could share a session)
@@ -979,8 +1197,13 @@ export class TeamBackend implements Backend {
         const t = this.fm.tasks.require(job.taskId!);
         systemAppend = workerSystemPrompt(this.fm, agentId, this.fm.repos.requireWorktree(t.repoId!, t.worktree!));
       }
-      const model = engine.model(role);
-      this.fm.agentLog(agentId, 'text', `${resume ? 'Resuming' : 'Starting'} ${job.kind}${job.taskId ? ` ${job.taskId}` : ''} (${engine.id === 'claude' ? model : `${engine.label} ${model}`})`);
+      const turnSel = this.turnModel(agentId, role, engine);
+      sel = turnSel;
+      if (turnSel.override) entry.fallback = true;
+      const model = turnSel.model;
+      const limitedFamily = this.st.leadFallback?.family;
+      const fallbackNote = turnSel.override ? `, ${turnSel.override.effort}: fallback${limitedFamily ? ` while ${capital(limitedFamily)} is limited` : ''}` : '';
+      this.fm.agentLog(agentId, 'text', `${resume ? 'Resuming' : 'Starting'} ${job.kind}${job.taskId ? ` ${job.taskId}` : ''} (${engine.id === 'claude' ? model : `${engine.label} ${model}`}${fallbackNote})`);
       if (job.kind === 'followup' || job.resumed) this.fm.agentLog(agentId, 'text', truncate(job.prompt, 400));
       const timer = setTimeout(() => this.abortTurn(entry, 'timeout'), TURN_TIMEOUT_MS);
       timer.unref?.();
@@ -996,6 +1219,7 @@ export class TeamBackend implements Backend {
           prompt,
           instructions: systemAppend,
           ...(resume ? { resume } : {}),
+          ...(turnSel.override ? { modelOverride: turnSel.override } : {}),
           env: agentEnv(process.env, { agentId, cwd }),
           writableRoots: await this.writableRoots(role, job),
           abort,
@@ -1013,12 +1237,13 @@ export class TeamBackend implements Backend {
             if (this.fm.store.data.sessions[job.sessionKey]?.sessionId !== id) this.recordSession(job.sessionKey, id, model, engine.id);
           },
           onModel: (m) => {
+            reported = m;
             const label = modelLabel(m);
             if (!label) return;
             this.reportedModels.set(agentId, { engine: engine.id, label });
             this.fm.setAgent(agentId, { engine: engine.id, model: label });
           },
-          onRateLimit: (r) => this.onRateLimit(r),
+          onRateLimit: (r) => this.onRateLimit(r, { agentId, fallback: !!turnSel.override, ...(reported ? { reported } : {}) }),
         });
       } finally {
         clearTimeout(timer);
@@ -1050,6 +1275,11 @@ export class TeamBackend implements Backend {
     if (reason) void this.reap(entry);
     delete this.st.inflight[agentId];
     this.fm.store.markDirty();
+    // the lead's own model's limit reset while this fallback turn ran: its nameplate shows its own model again
+    if (sel?.override && !this.onFallback()) {
+      this.reportedModels.delete(agentId);
+      this.showEngines();
+    }
     if (reason === 'pause') {
       const next: Job = { ...job, fresh: false, resumed: true, prompt: `${userName()} paused you and has now resumed you. Any question you had open was withdrawn; ask again if you still need it. Continue your current job.` };
       // resume may already have arrived while the aborted turn was unwinding
@@ -1063,12 +1293,16 @@ export class TeamBackend implements Backend {
       const a = this.fm.agent(agentId);
       if (a?.taskId === job.taskId) this.fm.setAgent(agentId, { state: 'idle', station: 'lounge', activity: 'task cancelled', taskId: null, worktree: null });
     } else if (stats?.isError && stats.limited) {
-      this.holdForLimit(job, stats);
+      // the lead's own model at its own limit: on to its fallback now; anything else waits for the reset
+      const origin: TurnOrigin = { agentId, fallback: !!sel?.override, ...(reported ? { reported } : {}) };
+      if (!sel || !this.continueOnFallback(job, stats, origin)) this.holdForLimit(job, stats);
     } else if (reason === 'timeout') {
       this.fm.agentLog(agentId, 'error', `turn timed out after ${TURN_TIMEOUT_MS / 60_000} min`);
       await this.afterTurn(job, { isError: true, subtype: 'timeout', errors: ['turn timed out'] }).catch((e) => this.fm.log.error(`afterTurn ${agentId}: ${(e as Error).stack ?? e}`));
     } else {
       if (stats && !stats.isError) this.limitBackoffMs = LIMIT_BACKOFF_MS;
+      // the lead's own model worked again: a later limit without a reset time starts from the shortest wait
+      if (stats && !stats.isError && agentId === LEAD && sel && !sel.override) this.fallbackBackoffMs = LIMIT_BACKOFF_MS;
       await this.afterTurn(job, stats).catch((e) => this.fm.log.error(`afterTurn ${agentId}: ${(e as Error).stack ?? e}`));
     }
     // the turn used some of the plan: fresh numbers (unless the poller is backing off)
