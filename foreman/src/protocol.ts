@@ -69,6 +69,13 @@ export const AuthStatus = z
   .describe('`failed` must be shown loudly (in-world banner): the claude backend cannot run.');
 export type AuthStatus = z.infer<typeof AuthStatus>;
 
+export const ModelSource = z
+  .enum(['default', 'config', 'override'])
+  .describe(
+    "Where an agent's model comes from: `default` the built-in one (lead opus, workers sonnet; Codex: your Codex config's), `config` the lead's / workers' model set in config.json, the environment or a flag, `override` the agent's own (config.json claude.agentModels / codex.agentModels, set with `agent.model`).",
+  );
+export type ModelSource = z.infer<typeof ModelSource>;
+
 const Id = z.string().min(1);
 const Ts = z.number().int().nonnegative().describe('epoch milliseconds');
 const HexColor = z.string().regex(/^#[0-9A-Fa-f]{6}$/).describe('"#RRGGBB"');
@@ -97,6 +104,18 @@ export const Agent = z.object({
   model: z.string().optional().describe('the model it runs, for display, e.g. "Opus 5.5" or "GPT-6 Astra" (the real model once a turn reported it)'),
 });
 export type Agent = z.infer<typeof Agent>;
+
+export const AgentModelInfo = z.object({
+  agentId: Id,
+  name: z.string().describe('display name, e.g. "Juniper"'),
+  engine: z.enum(['claude', 'codex']),
+  model: z.string().describe('the model its turns run, as configured: an alias ("sonnet"), a model id, or "default" (Codex: your Codex config\'s model)'),
+  label: z.string().describe('display name of that model, e.g. "Sonnet 5" (the real model once a turn reported it, else from the configured name: "Sonnet")'),
+  effort: z.string().optional().describe('the effort its turns run (absent: the engine\'s own default, Codex only)'),
+  source: ModelSource,
+  fallback: z.string().optional().describe('the lead only, while a usage limit of its own model is in force: what it runs meanwhile (claude.leadFallback), e.g. "Opus 5.5 (xhigh)"'),
+});
+export type AgentModelInfo = z.infer<typeof AgentModelInfo>;
 
 export const LogEntry = z.object({
   ts: Ts,
@@ -426,6 +445,28 @@ export const AgentActionMsg = z.object({
     ),
   arg: z.string().optional().describe('spawn: optional task id to assign to the agent'),
 });
+export const AgentModelMsg = z.object({
+  ...envelope('agent.model'),
+  agentId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('an agent id or name; "lead" (or "foreman"): the lead; "workers": every worker; "all": every agent. Omitted: every agent'),
+  model: z
+    .string()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe(
+      'Claude agents: an alias (`opus`, `sonnet`, `haiku`, `fable`), a Claude model id or a Bedrock ARN; Codex agents: a Codex model (never a Claude one). `default` removes the agent\'s own model (back to the lead\'s / workers\' model and effort). Omitted: only report',
+    ),
+  effort: z
+    .string()
+    .min(1)
+    .max(16)
+    .optional()
+    .describe('with `model`: Claude low|medium|high|xhigh|max, Codex none|minimal|low|medium|high|xhigh. Omitted: the role\'s effort'),
+});
 export const DiffRequestMsg = z.object({
   ...envelope('diff.request'),
   requestId: z.string().min(1),
@@ -441,6 +482,7 @@ export const ClientMessage = z.discriminatedUnion('type', [
   DecisionAnswerMsg,
   TaskActionMsg,
   AgentActionMsg,
+  AgentModelMsg,
   DiffRequestMsg,
   RepoAddMsg,
 ]);
@@ -514,12 +556,18 @@ export const CLIENT_MESSAGES = {
   'decision.answer': { schema: DecisionAnswerMsg, doc: 'Answer an open decision. Merge decisions: option "Merge" merges, "Request changes" sends `text` back to the worker, "Reject" abandons the branch.' },
   'task.action': { schema: TaskActionMsg, doc: 'Steer a task from the Task Wall.' },
   'agent.action': { schema: AgentActionMsg, doc: 'Pause/resume/stop an agent, or spawn (activate) an off-shift worker.' },
+  'agent.model': {
+    schema: AgentModelMsg,
+    doc:
+      "Report agents' models, or change one's (console: `/model [agent] [model] [effort]`). A change applies from the agent's next turn (a running turn is never stopped), shows on its nameplate at once, adds a feed line and is saved in `<home>/config.json` (`claude.agentModels` / `codex.agentModels`, by the agent's engine), where it beats the lead's / workers' model for the next runs too. A model the agent's engine cannot run is refused (a group skips such agents). The local player only: the Foreman listens on 127.0.0.1, and visitors in multiplayer never reach another player's Foreman. Answered with `ack.result` `{agents: AgentModelInfo[], text, changed?: string[], skipped?: {agentId, reason}[], saved?: boolean, saveError?: string}`: `text` is one line for the player (\"Juniper now runs Sonnet (high) from the next turn; saved\"); `saved` false with `saveError` when config.json could not be written (the change still applies until the Foreman restarts). The sim backend refuses it.",
+  },
   'diff.request': { schema: DiffRequestMsg, doc: 'Ask for the structured diff of a worktree. Answered with `diff` (same requestId).' },
   'repo.add': { schema: RepoAddMsg, doc: 'Register a local project folder: a git repository with commits, or any other existing folder, even an empty one (console: `/repo add <path>`).' },
 } as const;
 
 export const ENTITY_SCHEMAS = {
   Agent,
+  AgentModelInfo,
   LogEntry,
   Task,
   Decision,

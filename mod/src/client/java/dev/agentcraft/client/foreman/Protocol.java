@@ -102,6 +102,11 @@ public final class Protocol {
 		ADD, DEL, CTX, UNKNOWN
 	}
 
+	/** Where an agent's model comes from: the built-in default, the launch config, or its own (set with /model). */
+	public enum ModelSource implements Wire {
+		DEFAULT, CONFIG, OVERRIDE, UNKNOWN
+	}
+
 	/** Exact option labels (protocol.md). */
 	public static final String MERGE = "Merge";
 	public static final String REQUEST_CHANGES = "Request changes";
@@ -132,6 +137,21 @@ public final class Protocol {
 
 		public boolean isPaused() {
 			return paused != null && paused;
+		}
+	}
+
+	/**
+	 * One agent's model in the answer to {@code agent.model} ({@code ack.result.agents[]}): the model as configured
+	 * ("sonnet", a model id, "default"), its display {@code label} ("Sonnet 5"), the effort (null: the engine's default),
+	 * where it comes from, and for the lead on its fallback what it runs meanwhile ("Opus 5.5 (xhigh)").
+	 */
+	public record AgentModelInfo(String agentId, String name, @Nullable String engine, String model, String label, @Nullable String effort,
+		ModelSource source, @Nullable String fallback) {
+		public AgentModelInfo {
+			name = name == null ? agentId : name;
+			model = model == null ? "" : model;
+			label = label == null || label.isBlank() ? model : label;
+			source = source == null ? ModelSource.UNKNOWN : source;
 		}
 	}
 

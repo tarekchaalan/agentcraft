@@ -15,8 +15,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import type { CodexConfig } from '../../config.js';
+import type { AgentModel, CodexConfig } from '../../config.js';
 import type { Foreman } from '../../foreman.js';
+import type { ModelSource } from '../../protocol.js';
 import { truncate } from '../../util/text.js';
 import { userName } from '../../user.js';
 import type { AuthCheck, Engine, Role, TurnSpec, TurnStats } from '../engine.js';
@@ -114,8 +115,26 @@ export class CodexEngine implements Engine {
     return isolated;
   }
 
-  model(role: Role): string {
-    return (role === 'lead' ? this.cfg.leadModel : this.cfg.workerModel) ?? this.configuredModel ?? 'default';
+  /** The model an agent's thread is started with: its own (codex.agentModels), else its role's; undefined: the user's Codex config's. */
+  private threadModel(role: Role, agentId: string | undefined): string | undefined {
+    return (agentId ? this.cfg.agentModels[agentId]?.model : undefined) ?? (role === 'lead' ? this.cfg.leadModel : this.cfg.workerModel);
+  }
+
+  model(role: Role, agentId?: string): string {
+    return this.threadModel(role, agentId) ?? this.configuredModel ?? 'default';
+  }
+
+  effort(role: Role, agentId?: string): string | undefined {
+    return (agentId ? this.cfg.agentModels[agentId]?.effort : undefined) ?? (role === 'lead' ? this.cfg.leadEffort : this.cfg.effort);
+  }
+
+  modelSource(role: Role, agentId: string): ModelSource {
+    if (this.cfg.agentModels[agentId]) return 'override';
+    return (role === 'lead' ? this.cfg.leadModel : this.cfg.workerModel) ? 'config' : 'default';
+  }
+
+  get agentModels(): Record<string, AgentModel> {
+    return this.cfg.agentModels;
   }
 
   authFailedMessage(detail: string): string {
@@ -157,7 +176,7 @@ export class CodexEngine implements Engine {
   /** Config overrides for an agent thread (see the header). `userConfig`: the effective config. */
   private threadConfig(userConfig: any, spec: TurnSpec, serverEnv: NodeJS.ProcessEnv): Record<string, unknown> {
     const off = (names: string[]) => Object.fromEntries(names.map((n) => [n, { enabled: false }]));
-    const effort = spec.role === 'lead' ? this.cfg.leadEffort : this.cfg.effort;
+    const effort = this.effort(spec.role, spec.agentId);
     return {
       mcp_servers: off(Object.keys(userConfig?.mcp_servers ?? {})),
       plugins: off(Object.keys(userConfig?.plugins ?? {})),
@@ -214,7 +233,8 @@ export class CodexEngine implements Engine {
       await this.initialize(server);
       const userConfig = (await server.request<any>('config/read', { cwd }, 30_000).catch(() => undefined))?.config;
       if (typeof userConfig?.model === 'string') this.configuredModel ??= userConfig.model;
-      const model = role === 'lead' ? this.cfg.leadModel : this.cfg.workerModel;
+      // its own model (codex.agentModels, /model), else its role's, else the user's Codex config's
+      const model = this.threadModel(role, agentId);
       const dynamicTools = spec.tools.map((t) => ({ type: 'function', name: t.name, description: t.description, inputSchema: z.toJSONSchema(z.object(t.shape)) }));
       const thread = {
         cwd,

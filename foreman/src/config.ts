@@ -1,14 +1,19 @@
-// Configuration: defaults < <AGENTCRAFT_HOME>/config.json < environment < CLI flags.
+// Configuration: defaults < <AGENTCRAFT_HOME>/config.json < environment < CLI flags. A per-agent
+// model (claude.agentModels / codex.agentModels, which the console's /model writes) beats the lead's
+// and workers' models and effort for that agent.
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readJson } from './util/fsx.js';
+import { readJson, writeJsonAtomic } from './util/fsx.js';
 import type { BackendName } from './protocol.js';
 import { defaultUserName } from './user.js';
 import type { EffortLevel } from '@anthropic-ai/claude-agent-sdk';
 import { parseContextConfig, type AgentContextConfig } from './agents/claude/context.js';
 import { DEFAULT_PERMISSIONS, type PermissionsConfig } from './agents/claude/permissions.js';
 import { DEFAULT_SUBAGENTS, type SubagentsConfig } from './agents/claude/subagents.js';
+import { CODEX_EFFORTS, modelProblem, normalizeModel } from './agents/models.js';
+import { LEAD_ID, WORKER_IDS } from './cast.js';
 
 export const FOREMAN_VERSION = '0.1.0';
 
@@ -25,11 +30,28 @@ export interface LeadFallback {
   effort?: EffortLevel;
 }
 
+/**
+ * One agent's own model, and optionally its effort (config.json claude.agentModels.<agent> /
+ * codex.agentModels.<agent>, set with the console's /model): it beats the lead's or workers' model
+ * and effort for that agent. Without an effort the agent keeps its role's effort.
+ */
+export interface AgentModel<E extends string = string> {
+  model: string;
+  effort?: E;
+}
+
+/** Whether the lead's / workers' model is the built-in default or set (config.json, environment or a flag). */
+export type ModelOrigin = 'default' | 'config';
+
 export interface ClaudeConfig {
   leadModel: string;
   workerModel: string;
   effort: EffortLevel;
   leadEffort: EffortLevel;
+  /** claude.agentModels: per-agent model and effort, beating leadModel/workerModel/effort for that agent */
+  agentModels: Record<string, AgentModel<EffortLevel>>;
+  /** where leadModel / workerModel came from (the console's /model shows it) */
+  modelOrigin: { lead: ModelOrigin; worker: ModelOrigin };
   /** claude.leadFallback: the lead's model while its own model's usage limit is in force (default: none, the lead waits) */
   leadFallback?: LeadFallback;
   maxTurnsLead: number;
@@ -77,6 +99,8 @@ export interface CodexConfig {
   /** model_reasoning_effort for workers / the lead (low, medium, high, xhigh...) */
   effort?: string;
   leadEffort?: string;
+  /** codex.agentModels: per-agent model and effort for Codex agents, beating the models and effort above */
+  agentModels: Record<string, AgentModel>;
 }
 
 /** Which engine runs the lead, the workers, and per-agent exceptions (`--engines kit=codex`). */
@@ -299,6 +323,104 @@ function leadFallback(flags: Flags, env: NodeJS.ProcessEnv, file: unknown): Lead
   return { model, ...(fallbackEffort ? { effort: fallbackEffort } : {}) };
 }
 
+/** Every agent id (the cast is fixed: the lead and five workers). */
+export const AGENT_IDS: readonly string[] = [LEAD_ID, ...WORKER_IDS];
+
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * claude.agentModels / codex.agentModels: {"juniper": {"model": "sonnet", "effort": "high"}}. Each
+ * key is an agent id; each model must be one its engine runs (a Claude alias or id under claude, a
+ * non-Claude model under codex); an effort must be one the engine knows. A mistake stops the start,
+ * like any other bad setting, rather than an agent failing its first turn.
+ */
+function agentModelsConfig<E extends string>(v: unknown, engine: 'claude' | 'codex', efforts: readonly E[]): Record<string, AgentModel<E>> {
+  if (v === undefined) return {};
+  const where = `config.json ${engine}.agentModels`;
+  if (!isObject(v)) throw new Error(`${where} must be an object like {"juniper": {"model": "${engine === 'claude' ? 'sonnet' : 'gpt-5.1-codex'}", "effort": "high"}}`);
+  const out: Record<string, AgentModel<E>> = {};
+  for (const [agent, entry] of Object.entries(v)) {
+    if (!AGENT_IDS.includes(agent)) throw new Error(`${where}: no agent "${agent}" (use ${AGENT_IDS.join(', ')})`);
+    if (!isObject(entry) || typeof entry.model !== 'string' || !entry.model.trim()) throw new Error(`${where}.${agent} must be like {"model": "${engine === 'claude' ? 'sonnet' : 'gpt-5.1-codex'}", "effort": "high"}`);
+    const model = entry.model.trim();
+    const problem = modelProblem(engine, model);
+    if (problem === 'invalid') throw new Error(`${where}.${agent}.model "${model}" is not a model name`);
+    if (problem === 'not-claude') throw new Error(`${where}.${agent}.model "${model}" is not a Claude model (use opus, sonnet, haiku, fable or a claude-... id)`);
+    if (problem === 'claude') throw new Error(`${where}.${agent}.model "${model}" is a Claude model: Codex agents run Codex models (put it under claude.agentModels)`);
+    const effort = entry.effort;
+    if (effort !== undefined && (typeof effort !== 'string' || !(efforts as readonly string[]).includes(effort))) {
+      throw new Error(`${where}.${agent}.effort "${String(effort)}" is not an effort (use ${efforts.join(', ')})`);
+    }
+    // a hand-written "Sonnet" runs as the alias "sonnet"
+    out[agent] = { model: normalizeModel(engine, model), ...(effort !== undefined ? { effort: effort as E } : {}) };
+  }
+  return out;
+}
+
+/** A Claude agent's model and effort: its own (claude.agentModels), else its role's. */
+export function claudeModelFor(cfg: ClaudeConfig, agentId: string | undefined, role: 'lead' | 'worker'): { model: string; effort: EffortLevel } {
+  const own = agentId ? cfg.agentModels[agentId] : undefined;
+  return { model: own?.model ?? (role === 'lead' ? cfg.leadModel : cfg.workerModel), effort: own?.effort ?? (role === 'lead' ? cfg.leadEffort : cfg.effort) };
+}
+
+/** One agent's model change for config.json: its new model, or undefined to remove its own model. */
+export interface AgentModelChange {
+  section: 'claude' | 'codex';
+  agentId: string;
+  value: AgentModel | undefined;
+}
+
+/**
+ * Write per-agent models into <home>/config.json (`<section>.agentModels.<agent>`), keeping every
+ * other key and its order; the file is rewritten atomically (a temp file, then a rename) with two-space
+ * JSON. Only the given agents' entries change: nothing else from the running config (flags, the
+ * environment, anything secret) is ever written. An empty agentModels is removed again; with nothing
+ * to change (removing an entry that is not there) the file is not touched. Throws when the file is not
+ * a JSON object (it is left as it is then). Returns the file.
+ */
+export function saveAgentModels(home: string, changes: AgentModelChange[]): string {
+  const link = path.join(home, 'config.json');
+  const exists = fs.existsSync(link);
+  // a config.json that is a symlink stays one: its target is rewritten
+  const file = exists ? fs.realpathSync(link) : link;
+  const raw = exists ? fs.readFileSync(file, 'utf8') : '';
+  let doc: unknown = {};
+  if (raw.trim()) {
+    try {
+      doc = JSON.parse(raw);
+    } catch (e) {
+      throw new Error(`config.json is not valid JSON (${(e as Error).message}); fix it, then try again`);
+    }
+  }
+  if (!isObject(doc)) throw new Error('config.json is not a JSON object');
+  let dirty = false;
+  for (const c of changes) {
+    let section = doc[c.section];
+    if (section === undefined) {
+      if (!c.value) continue;
+      section = doc[c.section] = {};
+    }
+    if (!isObject(section)) throw new Error(`config.json "${c.section}" is not an object`);
+    let models = section.agentModels;
+    if (models === undefined) {
+      if (!c.value) continue;
+      models = section.agentModels = {};
+    }
+    if (!isObject(models)) throw new Error(`config.json ${c.section}.agentModels is not an object`);
+    if (c.value) models[c.agentId] = { model: c.value.model, ...(c.value.effort ? { effort: c.value.effort } : {}) };
+    else if (c.agentId in models) delete models[c.agentId];
+    else continue;
+    dirty = true;
+    if (!Object.keys(models).length) delete section.agentModels;
+  }
+  if (!dirty) return file;
+  const mode = exists ? fs.statSync(file).mode & 0o777 : undefined;
+  writeJsonAtomic(file, doc);
+  // the rename leaves the umask's mode: keep the file's own (POSIX)
+  if (mode !== undefined && process.platform !== 'win32') fs.chmodSync(file, mode);
+  return file;
+}
+
 /** Every flag loadConfig reads (the `no-` prefix is stripped by parseFlags). */
 export const KNOWN_FLAGS = new Set([
   'home', 'backend', 'profile', 'user-name', 'use-claude-login', 'repo', 'workers', 'model', 'port', 'goal', 'autostart', 'reset', 'notify',
@@ -374,6 +496,8 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
       : ['juniper', 'kit', 'wren'];
 
   const model = str(flags.model);
+  const leadModel = str(flags['lead-model']) ?? model ?? str(env.AGENTCRAFT_LEAD_MODEL) ?? str(fileClaude.leadModel);
+  const workerModel = str(flags['worker-model']) ?? model ?? str(env.AGENTCRAFT_WORKER_MODEL) ?? str(fileClaude.workerModel);
   const fallback = leadFallback(flags, env, fileClaude.leadFallback);
   const cfg: Config = {
     backend,
@@ -398,10 +522,12 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
     // the sim answers merges unattended (screenshot QA, --auto-answer): never sign there
     signMerges: bool(pick('sign-merges', 'AGENTCRAFT_SIGN_MERGES'), backend !== 'sim'),
     claude: {
-      leadModel: str(flags['lead-model']) ?? model ?? str(env.AGENTCRAFT_LEAD_MODEL) ?? str(fileClaude.leadModel) ?? 'opus',
-      workerModel: str(flags['worker-model']) ?? model ?? str(env.AGENTCRAFT_WORKER_MODEL) ?? str(fileClaude.workerModel) ?? 'sonnet',
+      leadModel: leadModel ?? 'opus',
+      workerModel: workerModel ?? 'sonnet',
       effort: effort(flags.effort ?? fileClaude.effort, 'medium'),
       leadEffort: effort(flags['lead-effort'] ?? flags.effort ?? fileClaude.leadEffort, 'medium'),
+      agentModels: agentModelsConfig(fileClaude.agentModels, 'claude', EFFORTS),
+      modelOrigin: { lead: leadModel ? 'config' : 'default', worker: workerModel ? 'config' : 'default' },
       ...(fallback ? { leadFallback: fallback } : {}),
       maxTurnsLead: num(flags['max-turns-lead'] ?? flags['max-turns'] ?? fileClaude.maxTurnsLead, 40),
       maxTurnsWorker: num(flags['max-turns-worker'] ?? flags['max-turns'] ?? fileClaude.maxTurnsWorker, 80),
@@ -425,6 +551,7 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
       workerModel: str(flags['codex-worker-model']) ?? str(flags['codex-model']) ?? str(fileCodex.workerModel) ?? str(fileCodex.model),
       effort: str(flags['codex-effort']) ?? str(fileCodex.effort),
       leadEffort: str(flags['codex-lead-effort']) ?? str(flags['codex-effort']) ?? str(fileCodex.leadEffort) ?? str(fileCodex.effort),
+      agentModels: agentModelsConfig(fileCodex.agentModels, 'codex', CODEX_EFFORTS),
     },
     engines: {
       lead: engineName(pick('lead-engine', 'AGENTCRAFT_LEAD_ENGINE') ?? (file.engines as Record<string, unknown> | undefined)?.lead, backend === 'codex' ? 'codex' : 'claude', 'lead engine'),
@@ -490,6 +617,9 @@ usage: npm run start -- [options]
                            --no-lead-fallback-model turns off one set there)
   --lead-fallback-effort <e>  its effort (default: the lead's; env AGENTCRAFT_LEAD_FALLBACK_EFFORT,
                            config.json claude.leadFallback.effort)
+  one agent's own model:   config.json claude.agentModels, e.g. {"juniper": {"model": "sonnet",
+                           "effort": "high"}}: beats the models and effort above for that agent;
+                           the console's /model <agent> <model> [effort] sets it (and saves it)
   --max-turns <n>          turn cap per session run (default lead 40 / worker 80)
   --workers <n|ids>        team size or comma list (default juniper,kit,wren)
   --max-concurrent <n>     workers running at once (default 3)
@@ -514,6 +644,7 @@ usage: npm run start -- [options]
   --codex-model <m>        model for Codex agents (default: your Codex config's model)
   --codex-lead-model <m> / --codex-worker-model <m>
   --codex-effort <e>       reasoning effort (low|medium|high|xhigh...; default: your Codex config's)
+  one Codex agent's own model: config.json codex.agentModels (like claude.agentModels; /model sets it)
   Codex agents get none of your own MCP servers, plugins, web search or apps; every command and
   out-of-worktree edit goes through the same policy and in-game permission prompts.
 `;

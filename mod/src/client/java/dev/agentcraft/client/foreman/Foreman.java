@@ -79,6 +79,16 @@ public final class Foreman {
 		return link.send(ForemanJson.msg("agent.action").put("agentId", agentId).put("action", action).put("arg", arg).json());
 	}
 
+	/**
+	 * Report or change agents' models ({@code agent.model}, the console's /model). {@code agentId}: an agent, "lead",
+	 * "workers" or "all" (null: everyone); {@code model} null: only report, "default": back to the configured model;
+	 * {@code effort} optional. The ack's result carries {@code agents} ({@link Protocol.AgentModelInfo}[]) and {@code text}
+	 * (one line for the player), and for a change {@code saved} (false: config.json could not be written).
+	 */
+	public static CompletableFuture<Ack> agentModel(@Nullable String agentId, @Nullable String model, @Nullable String effort) {
+		return link.send(ForemanJson.msg("agent.model").put("agentId", agentId).put("model", model).put("effort", effort).json());
+	}
+
 	public static CompletableFuture<Ack> addRepo(String path) {
 		return link.send(ForemanJson.msg("repo.add").put("path", path).json());
 	}

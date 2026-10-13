@@ -89,6 +89,7 @@ Foreman.message("kit", "please also cover emoji tags");                         
 Foreman.answer("d3", Protocol.MERGE, null);                                      // REQUEST_CHANGES + text, REJECT, ALLOW_ONCE, ALWAYS_ALLOW, DENY
 Foreman.taskAction("t3", "reassign", "wren");                                    // cancel | retry | prioritize [n] | reassign <agent>
 Foreman.agentAction("kit", "pause", null);                                       // resume | stop | spawn [taskId]
+Foreman.agentModel("juniper", "sonnet", "high");                                 // agent.model: null model = report; "default" = back; result.agents/text/saved
 Foreman.addRepo("C:\\path\\to\\repo");
 Foreman.requestDiff(decision.repoId(), decision.worktree()).thenAccept(diff -> ...); // Protocol.Diff, files/hunks/lines
 Foreman.send("any.type", payloadJson);                                           // anything else in docs/protocol.md

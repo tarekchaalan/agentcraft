@@ -29,6 +29,7 @@
 - <a id="repomode"></a>**RepoMode**: `git`, `folder`
 - <a id="backendname"></a>**BackendName**: `sim`, `claude`, `codex`
 - <a id="authstatus"></a>**AuthStatus**: `ok`, `failed`, `unknown`, `checking` - `failed` must be shown loudly (in-world banner): the claude backend cannot run.
+- <a id="modelsource"></a>**ModelSource**: `default`, `config`, `override` - Where an agent's model comes from: `default` the built-in one (lead opus, workers sonnet; Codex: your Codex config's), `config` the lead's / workers' model set in config.json, the environment or a flag, `override` the agent's own (config.json claude.agentModels / codex.agentModels, set with `agent.model`).
 
 Exact option labels: merge decisions use `Merge`, `Request changes`, `Reject`; permission decisions use `Allow once`, `Always allow for this agent`, `Deny`. Question decisions use agent-supplied options (may be empty: free text).
 
@@ -55,6 +56,19 @@ Exact option labels: merge decisions use `Merge`, `Request changes`, `Reject`; p
 | `active` | boolean | yes | false = off shift (not on the current team, or stopped by the user); render idle in the lounge |
 | `engine` | `claude` \| `codex` | no | which engine runs this agent (absent: the sim) |
 | `model` | string | no | the model it runs, for display, e.g. "Opus 5.5" or "GPT-6 Astra" (the real model once a turn reported it) |
+
+### <a id="agentmodelinfo"></a>AgentModelInfo
+
+| field | type | required | notes |
+| --- | --- | --- | --- |
+| `agentId` | string | yes |  |
+| `name` | string | yes | display name, e.g. "Juniper" |
+| `engine` | `claude` \| `codex` | yes |  |
+| `model` | string | yes | the model its turns run, as configured: an alias ("sonnet"), a model id, or "default" (Codex: your Codex config's model) |
+| `label` | string | yes | display name of that model, e.g. "Sonnet 5" (the real model once a turn reported it, else from the configured name: "Sonnet") |
+| `effort` | string | no | the effort its turns run (absent: the engine's own default, Codex only) |
+| `source` | [ModelSource](#modelsource) | yes | Where an agent's model comes from: `default` the built-in one (lead opus, workers sonnet; Codex: your Codex config's), `config` the lead's / workers' model set in config.json, the environment or a flag, `override` the agent's own (config.json claude.agentModels / codex.agentModels, set with `agent.model`). |
+| `fallback` | string | no | the lead only, while a usage limit of its own model is in force: what it runs meanwhile (claude.leadFallback), e.g. "Opus 5.5 (xhigh)" |
 
 ### <a id="logentry"></a>LogEntry
 
@@ -1067,6 +1081,28 @@ Pause/resume/stop an agent, or spawn (activate) an off-shift worker.
 }
 ```
 
+### `agent.model`
+
+Report agents' models, or change one's (console: `/model [agent] [model] [effort]`). A change applies from the agent's next turn (a running turn is never stopped), shows on its nameplate at once, adds a feed line and is saved in `<home>/config.json` (`claude.agentModels` / `codex.agentModels`, by the agent's engine), where it beats the lead's / workers' model for the next runs too. A model the agent's engine cannot run is refused (a group skips such agents). The local player only: the Foreman listens on 127.0.0.1, and visitors in multiplayer never reach another player's Foreman. Answered with `ack.result` `{agents: AgentModelInfo[], text, changed?: string[], skipped?: {agentId, reason}[], saved?: boolean, saveError?: string}`: `text` is one line for the player ("Juniper now runs Sonnet (high) from the next turn; saved"); `saved` false with `saveError` when config.json could not be written (the change still applies until the Foreman restarts). The sim backend refuses it.
+
+| field | type | required | notes |
+| --- | --- | --- | --- |
+| `id` | string | no | client correlation id; the Foreman answers with `ack` {re: id} |
+| `agentId` | string | no | an agent id or name; "lead" (or "foreman"): the lead; "workers": every worker; "all": every agent. Omitted: every agent |
+| `model` | string | no | Claude agents: an alias (`opus`, `sonnet`, `haiku`, `fable`), a Claude model id or a Bedrock ARN; Codex agents: a Codex model (never a Claude one). `default` removes the agent's own model (back to the lead's / workers' model and effort). Omitted: only report |
+| `effort` | string | no | with `model`: Claude low\|medium\|high\|xhigh\|max, Codex none\|minimal\|low\|medium\|high\|xhigh. Omitted: the role's effort |
+
+```json
+{
+  "v": 1,
+  "type": "agent.model",
+  "id": "c19",
+  "agentId": "juniper",
+  "model": "sonnet",
+  "effort": "high"
+}
+```
+
 ### `diff.request`
 
 Ask for the structured diff of a worktree. Answered with `diff` (same requestId).
@@ -1116,5 +1152,6 @@ Register a local project folder: a git repository with commits, or any other exi
 | `/answer [dN] <n\|label> [text]` | `decision.answer {decisionId, option, text?}` |
 | `/repo add <path>` | `repo.add {path}` |
 | `/pause @name`, `/resume @name`, `/stop @name`, `/spawn @name [taskId]` | `agent.action` (spawn: `arg` = task id) |
+| `/model`, `/model <agent\|lead\|workers\|all>`, `/model <agent> <model\|default> [effort]` | `agent.model {agentId?, model?, effort?}` |
 | `/task <id> cancel\|retry\|prioritize [n]\|reassign <agent>` | `task.action` |
 

@@ -13,6 +13,7 @@ import { Memory, MemoryError } from './memory.js';
 import { Notifier } from './notifier.js';
 import type {
   Agent,
+  AgentModelInfo,
   AgentState,
   BackendName,
   ClientMessage,
@@ -49,6 +50,29 @@ export interface Backend {
   onMergeConflict?(task: Task, info: { base: string; branch: string; files: string[]; reason: string }): boolean;
   onTaskAction(task: Task, action: 'reassign' | 'cancel' | 'retry' | 'prioritize', arg?: string): void;
   onAgentAction(agentId: string, action: 'pause' | 'resume' | 'stop' | 'spawn', arg?: string): Promise<void> | void;
+  /**
+   * `agent.model` (the console's /model): report these agents' models, or (with `change`) give them
+   * their own model and effort, from their next turn, saved in config.json. `group`: several agents
+   * were named at once ("workers", "all"), so one whose engine cannot run the model is skipped rather
+   * than refusing the whole change. Absent: the backend has no models to choose (the sim).
+   */
+  agentModels?(agentIds: string[], change: ModelChange | undefined, group: boolean): AgentModelResult;
+}
+
+/** `agent.model` with a model: `model` "default" removes the agents' own model. */
+export interface ModelChange {
+  model: string;
+  effort?: string;
+}
+
+/** `ack.result` of `agent.model` (see protocol.ts CLIENT_MESSAGES['agent.model']). */
+export interface AgentModelResult extends Record<string, unknown> {
+  agents: AgentModelInfo[];
+  text: string;
+  changed?: string[];
+  skipped?: Array<{ agentId: string; reason: string }>;
+  saved?: boolean;
+  saveError?: string;
 }
 
 export type Reply = (msg: Outbound) => void;
@@ -537,6 +561,8 @@ export class Foreman {
       case 'agent.action':
         await this.agentAction(msg.agentId, msg.action, msg.arg);
         return { agentId: msg.agentId };
+      case 'agent.model':
+        return this.agentModel(msg.agentId, msg.model, msg.effort);
       case 'diff.request': {
         try {
           const d = await this.repos.diff(msg.repoId, msg.worktree);
@@ -630,6 +656,33 @@ export class Foreman {
     await this.backend?.onAgentAction(id, action, arg);
     // spawn @wren t3: on shift, and t3 is hers
     if (action === 'spawn' && arg) this.taskAction(arg, 'reassign', id);
+  }
+
+  /**
+   * The agents an `agent.model` names: one agent (id or name, "@" allowed), "lead" / "foreman" (the
+   * lead), "workers" (every worker, on shift or not: what they run when spawned) or "all" / omitted
+   * (everyone, the lead first). `group`: more than one agent was meant.
+   */
+  modelTargets(target: string | undefined): { ids: string[]; group: boolean } {
+    const t = (target ?? '').replace(/^@/, '').trim().toLowerCase();
+    const all = this.agents().map((a) => a.id);
+    const lead = this.agents().filter((a) => a.role === 'lead').map((a) => a.id);
+    if (!t || t === 'all' || t === 'everyone' || t === 'team') return { ids: [...lead, ...all.filter((id) => !lead.includes(id))], group: true };
+    if (t === 'lead' || t === 'foreman') return { ids: lead, group: false };
+    if (t === 'workers' || t === 'worker') return { ids: this.agents().filter((a) => a.role === 'worker').map((a) => a.id), group: true };
+    const id = this.resolveAgentId(t);
+    if (!id) throw new ClientError(`no agent named "${target}" (an agent's name, lead, workers or all)`);
+    return { ids: [id], group: false };
+  }
+
+  /** `agent.model`: report or change agents' models (the backend does both; the sim has none). */
+  agentModel(target: string | undefined, model: string | undefined, effort: string | undefined): AgentModelResult {
+    const { ids, group } = this.modelTargets(target);
+    if (!this.backend?.agentModels) {
+      throw new ClientError(this.config.backend === 'sim' ? 'the simulated team has no models to choose: /model needs the claude or codex backend' : 'this backend has no models to choose');
+    }
+    if (model === undefined && effort !== undefined) throw new ClientError(`an effort goes with a model: /model ${target ?? '<agent>'} <model> ${effort}`);
+    return this.backend.agentModels(ids, model === undefined ? undefined : { model, ...(effort !== undefined ? { effort } : {}) }, group);
   }
 
   // ---- lifecycle ----------------------------------------------------------------------------

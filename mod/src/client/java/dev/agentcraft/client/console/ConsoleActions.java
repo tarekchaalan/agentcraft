@@ -1,6 +1,7 @@
 package dev.agentcraft.client.console;
 
 import dev.agentcraft.client.console.ConsoleCommands.AgentAction;
+import dev.agentcraft.client.console.ConsoleCommands.AgentModels;
 import dev.agentcraft.client.console.ConsoleCommands.Answer;
 import dev.agentcraft.client.console.ConsoleCommands.Clear;
 import dev.agentcraft.client.console.ConsoleCommands.Command;
@@ -28,6 +29,7 @@ import dev.agentcraft.client.foreman.Foreman;
 import dev.agentcraft.client.foreman.ForemanState;
 import dev.agentcraft.client.foreman.Protocol.Ack;
 import dev.agentcraft.client.foreman.Protocol.Agent;
+import dev.agentcraft.client.foreman.Protocol.AgentModelInfo;
 import dev.agentcraft.client.foreman.Protocol.Decision;
 import dev.agentcraft.client.foreman.Protocol.Repo;
 import dev.agentcraft.client.foreman.Protocol.Task;
@@ -250,11 +252,46 @@ public final class ConsoleActions {
 			case TaskAction t -> track(Foreman.taskAction(t.taskId(), t.action(), t.arg()), raw, restore,
 				ack -> t.taskId() + " " + pastTense(t.action()) + (t.arg() != null ? " \u2192 " + t.arg() : "") + " " + UiBits.CHECK, t.action() + " "
 					+ t.taskId() + "\u2026");
+			case AgentModels m -> {
+				String who = ConsoleCommands.modelTargetName(m.target(), s);
+				// a list prints one line per agent; a change shows the Foreman's line ("Juniper now runs Sonnet (high) from the
+				// next turn; saved"), in the console too when config.json could not be written
+				track(Foreman.agentModel(m.target(), m.model(), m.effort()), raw, restore, ack -> {
+					String text = ack.result() != null && ack.result().has("text") ? ack.result().get("text").getAsString() : null;
+					if (m.model() == null) {
+						return (m.target() == null || m.target().equals("all") || m.target().equals("workers") ? "models below" : who + "'s model below") + " "
+							+ UiBits.CHECK;
+					}
+					return (text != null ? text : who + " \u2192 " + m.model()) + " " + UiBits.CHECK;
+				}, m.model() == null ? "asking for the models\u2026" : "switching " + who + "\u2026", null, ack -> modelAnswer(m, ack));
+			}
 			default -> {
 				return After.KEEP;
 			}
 		}
 		return After.CLEAR;
+	}
+
+	/**
+	 * /model's answer, after the status line shows it: a list prints one line per agent (its face, name, model, effort and
+	 * where it comes from); a change that could not be saved says so in the console as well, in the warning colour.
+	 */
+	private static void modelAnswer(AgentModels m, Ack ack) {
+		if (m.model() == null) {
+			ConsoleLog.add(Tone.HEADER, "Models");
+			for (AgentModelInfo i : ConsoleCommands.modelInfos(ack.result())) {
+				ConsoleLog.add(Tone.INFO, ConsoleCommands.modelLine(i), i.agentId());
+			}
+			ConsoleLog.add(Tone.HELP, "/model <agent> <model> [effort]\tchange one: opus, sonnet, haiku, fable or a model id (default: back to the "
+				+ "configured one); saved in config.json, from its next turn");
+			return;
+		}
+		var r = ack.result();
+		if (r != null && r.has("saved") && !r.get("saved").getAsBoolean()) {
+			String text = r.has("text") ? r.get("text").getAsString() : "not saved in config.json";
+			setFeedback(text, Tone.WARN, false);
+			ConsoleLog.add(Tone.WARN, text);
+		}
 	}
 
 	private static String pastTense(String verb) {
@@ -279,14 +316,25 @@ public final class ConsoleActions {
 		track(f, raw, restore, ok, pending, null);
 	}
 
-	/** {@code onError} runs (client thread) when the send fails or the Foreman refuses it. */
 	private static void track(CompletableFuture<Ack> f, String raw, Consumer<String> restore, OkText ok, String pending, @Nullable Runnable onError) {
+		track(f, raw, restore, ok, pending, onError, null);
+	}
+
+	/**
+	 * {@code onError} runs (client thread) when the send fails or the Foreman refuses it; {@code onOk} after a good ack,
+	 * once the status line shows it (it may print lines or change the status line's tone).
+	 */
+	private static void track(CompletableFuture<Ack> f, String raw, Consumer<String> restore, OkText ok, String pending, @Nullable Runnable onError,
+		@Nullable Consumer<Ack> onOk) {
 		sentCount++;
 		setFeedback(pending, Tone.INFO, true);
 		f.whenComplete((ack, err) -> {
 			if (err == null && ack != null && ack.ok()) {
 				ackOkCount++;
 				setFeedback(ok.text(ack), Tone.OK, false);
+				if (onOk != null) {
+					onOk.accept(ack);
+				}
 				return;
 			}
 			ackErrorCount++;

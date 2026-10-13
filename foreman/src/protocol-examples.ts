@@ -211,6 +211,7 @@ export const CLIENT_EXAMPLES: Ex<ClientMessage> = {
   'decision.answer': { v: 1, type: 'decision.answer', id: 'c14', decisionId: 'd2', option: 'Request changes', text: 'Export TAG_RE so format.ts can reuse it.' },
   'task.action': { v: 1, type: 'task.action', id: 'c15', taskId: 't5', action: 'reassign', arg: 'wren' },
   'agent.action': { v: 1, type: 'agent.action', id: 'c16', agentId: 'juniper', action: 'pause' },
+  'agent.model': { v: 1, type: 'agent.model', id: 'c19', agentId: 'juniper', model: 'sonnet', effort: 'high' },
   'diff.request': { v: 1, type: 'diff.request', id: 'c17', requestId: 'r7', repoId: 'demo-app', worktree: 'kit-t2' },
   'repo.add': { v: 1, type: 'repo.add', id: 'c18', path: 'C:\\Projects\\agentcraft\\sandbox\\demo-app' },
 };

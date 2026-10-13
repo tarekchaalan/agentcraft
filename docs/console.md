@@ -35,14 +35,47 @@ back the next time it opens (this session), and the console terminal shows it on
 | `/answer [d4] <n\|option> [text]` | `decision.answer`; `n` is the 1-based button number; the id can be left out when one decision is open; free text for questions; `Request changes` needs the feedback text |
 | `/repo add <path>`, `/repos` | `repo.add` (any existing folder, git or not), list repos |
 | `/pause @x`, `/resume @x`, `/stop @x` (also `all`), `/spawn @x [task]` | `agent.action` |
+| `/model`, `/model <agent>`, `/model <agent> <model> [effort]` | `agent.model`: list every agent's model, show one, or change it (see Models below) |
 | `/task <id> cancel\|retry\|prioritize [n]\|reassign @x` | `task.action` |
 | `/diff [worktree\|@agent\|task]` | opens the diff screen (`diff`, owned by the diff feature); without one, prints a file summary from `diff.request` |
 | `/status`, `/help`, `/decide`, `/clear`, `/sound on\|off`, `/theme dark\|light` | local |
 | `/hud [off\|pill\|pill+\|panel] [position] [s\|m\|l]`, `/hud peek\|autohide\|combat on\|off`, `/hud cycle`, `/hud reset` | local: the HUD overlay (saved to `<game dir>/agentcraft/hud.json`); `/hud` alone shows the settings |
 | `/foreman [start\|restart\|stop\|log]` | local: the Foreman the game starts (mod/DEV.md "Foreman launcher"). Alone: its state, checkout, why an older one is left running, npm progress, the log's last lines. `start` starts (or reuses) one; `restart` and `stop` only touch one the game started; `log` opens its log |
 
+### Models (`/model`)
+
+`/model <agent> <model> [effort]` gives one agent its own model, from its next turn: a turn already
+running finishes on the model it started with. The nameplate badge and the banner change at once, the
+feed says "Juniper switched to Sonnet (high, set by <your name>)", and the change is saved in the Foreman's
+`config.json` (`claude.agentModels`, or `codex.agentModels` for a Codex agent), so the next runs keep
+it; there it beats the lead's / workers' model and effort for that agent.
+
+| input | does |
+| --- | --- |
+| `/model` | every agent's model and effort, and where it comes from: `default` (built in), `configured` (config.json, a flag or the environment) or `set with /model`; the lead's fallback while it runs one |
+| `/model juniper` | one agent's (`lead`, `workers`, `all` work too) |
+| `/model juniper sonnet` | Juniper runs Sonnet from her next turn, with her role's effort |
+| `/model juniper sonnet high` | ... at effort `high` (Claude: `low`, `medium`, `high`, `xhigh`, `max`; Codex: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`) |
+| `/model foreman opus`, `/model lead opus` | the lead (Marlow) |
+| `/model workers haiku`, `/model all fable max` | every worker / everyone; agents on another engine are skipped and named |
+| `/model juniper default` | back to the configured model and effort (the entry leaves config.json) |
+
+- Agent: any agent's name or id, any case, `@` optional, a unique prefix like `@` mentions.
+- Model: Claude agents take `opus`, `sonnet`, `haiku`, `fable` (aliases: the CLI resolves them to the
+  current model of that family, so the badge says "Sonnet" until the next turn reports "Sonnet 5") or a
+  full Claude model id (`claude-sonnet-5`, a Bedrock or Vertex id). Codex agents take Codex model names
+  (`gpt-5.1-codex`). A model the agent's engine cannot run (a Claude alias for a Codex agent, a typo
+  such as `sonet`) is refused before Enter and by the Foreman; nothing changes then.
+- Usage limits: an agent moved onto a model whose own usage limit is in force waits for it (a lead with
+  `claude.leadFallback` runs its fallback meanwhile); one moved off a limited model runs at once.
+- Only the person at this console can do it: the console talks to your own Foreman on 127.0.0.1, and a
+  visitor in multiplayer cannot type into your console terminal.
+- If config.json cannot be written (it is not valid JSON, say), the change still applies until the
+  Foreman restarts and the console says it was not saved.
+
 Tab completes agent names (also after `/pause` etc.), commands, decision ids and options, task ids
-and worktrees; repeated Tab cycles, Up/Down move in the popup. Up/Down otherwise walk the history
+and worktrees, and after `/model` the agents and groups, the models and the efforts; repeated Tab
+cycles, Up/Down move in the popup. Up/Down otherwise walk the history
 (kept in `<game dir>/agentcraft/console-history.txt`). Shift+Enter adds a line; a multi-line
 paste grows the bar (up to 6 lines, then it scrolls).
 

@@ -3,10 +3,10 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { query, type AgentDefinition, type CanUseTool, type Options, type Query } from '@anthropic-ai/claude-agent-sdk';
-import type { ClaudeConfig } from '../../config.js';
+import { query, type AgentDefinition, type CanUseTool, type EffortLevel, type Options, type Query } from '@anthropic-ai/claude-agent-sdk';
+import { claudeModelFor, type AgentModel, type ClaudeConfig } from '../../config.js';
 import type { Foreman } from '../../foreman.js';
-import type { Usage } from '../../protocol.js';
+import type { ModelSource, Usage } from '../../protocol.js';
 import { userName } from '../../user.js';
 import { truncate } from '../../util/text.js';
 import type { AuthCheck, Engine, Role, TurnSpec, TurnStats } from '../engine.js';
@@ -146,8 +146,20 @@ export class ClaudeEngine implements Engine {
     };
   }
 
-  model(role: Role): string {
-    return role === 'lead' ? this.cfg.leadModel : this.cfg.workerModel;
+  model(role: Role, agentId?: string): string {
+    return claudeModelFor(this.cfg, agentId, role).model;
+  }
+
+  effort(role: Role, agentId?: string): EffortLevel {
+    return claudeModelFor(this.cfg, agentId, role).effort;
+  }
+
+  modelSource(role: Role, agentId: string): ModelSource {
+    return this.cfg.agentModels[agentId] ? 'override' : this.cfg.modelOrigin[role];
+  }
+
+  get agentModels(): Record<string, AgentModel> {
+    return this.cfg.agentModels;
   }
 
   authFailedMessage(detail: string): string {
@@ -250,9 +262,10 @@ export class ClaudeEngine implements Engine {
     const extra = instructionsBlock(this.cfg.context, spec.repoPath, userName(), undefined, (m) => this.warnOnce(m));
     const options: Options = {
       cwd,
-      // the lead's fallback (claude.leadFallback) while its own model's usage limit is in force
-      model: spec.modelOverride?.model ?? this.model(role),
-      effort: spec.modelOverride?.effort ?? (role === 'lead' ? this.cfg.leadEffort : this.cfg.effort),
+      // the lead's fallback (claude.leadFallback) while its own model's usage limit is in force; else
+      // the agent's own model and effort (claude.agentModels, /model), else its role's
+      model: spec.modelOverride?.model ?? this.model(role, agentId),
+      effort: spec.modelOverride?.effort ?? this.effort(role, agentId),
       maxTurns: role === 'lead' ? this.cfg.maxTurnsLead : this.cfg.maxTurnsWorker,
       settingSources: [],
       // only the servers passed here: no .mcp.json, no plugin servers, no claude.ai connectors

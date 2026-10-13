@@ -58,6 +58,7 @@ In the TUI (and in the mod's console) type:
 | `/diff kit-t2` or `/diff d3` | show a worktree's diff (or a merge decision's) |
 | `/repo add C:\path\to\repo` | connect a repo |
 | `/pause @kit`, `/resume @kit`, `/stop @kit`, `/spawn @tove` | steer agents (see Steering) |
+| `/model`, `/model kit`, `/model juniper sonnet high`, `/model foreman opus`, `/model kit default` | show or change an agent's model (see Per-agent models) |
 | `/task t3 cancel\|retry\|prioritize [n]\|reassign @wren` | steer tasks |
 | `/status`, `/tasks`, `/agents`, `/decisions`, `/memory [id]`, `/feed` | views |
 
@@ -90,6 +91,7 @@ most ~100 ms of state, and interrupted agent turns resume on the next start.
 | `--notify` / `--no-notify` / `AGENTCRAFT_NOTIFY` | on for claude, off for sim | Windows, macOS or Linux (`notify-send`) notifications |
 | `--toast-silent` | | toast without sound |
 | `--model`, `--lead-model`, `--worker-model` | lead `opus`, workers `sonnet` | any model id/alias the CLI accepts |
+| config `claude.agentModels` / `codex.agentModels` | none | one agent's own model and effort, beating the lead's / workers' model and effort (and those flags) for that agent; the console's `/model` writes it (see Per-agent models) |
 | `--effort low..max` | `medium` | |
 | `--lead-fallback-model` / `AGENTCRAFT_LEAD_FALLBACK_MODEL` / config `claude.leadFallback.model` | none | the lead's model while a usage limit of its own model is in force, e.g. a Fable lead at the Fable limit (see Lead fallback); `--no-lead-fallback-model` turns off one set in config.json |
 | `--lead-fallback-effort` / `AGENTCRAFT_LEAD_FALLBACK_EFFORT` / config `claude.leadFallback.effort` | the lead's effort | its effort, `low..max` |
@@ -119,8 +121,9 @@ depends on which limit it is:
 - A model's own weekly limit holds only the agents whose next turn runs that model; everyone else
   keeps working. The rate-limit type of the refusal says which (`seven_day_overage_included` is the
   Fable limit, `seven_day_opus` and `seven_day_sonnet` those models'), else the CLI's "You've hit
-  your Fable limit" / "You've reached your Fable limit" message. An agent's model is the lead's or
-  workers' configured model (the lead's fallback while it runs it). A Fable limit holds a Fable lead
+  your Fable limit" / "You've reached your Fable limit" message. An agent's model is its own
+  (`claude.agentModels`, `/model`), else the lead's or workers' configured model (the lead's fallback
+  while it runs it). A Fable limit holds a Fable lead
   and Fable workers, never the workers on Opus; a worker on a model that is limited gets no new task
   meanwhile.
 - The usage poll sees a model's limit coming: a model's weekly window (`weekly:fable`) at 100% with a
@@ -167,6 +170,43 @@ instead:
 - The state is saved: after a restart the lead stays on the fallback until the reset, unless the
   config no longer names a fallback for that lead model (it then waits for the limit on its own
   model). Claude lead only (a Codex lead has none).
+
+### Per-agent models (`claude.agentModels`, `codex.agentModels`)
+
+One agent can run its own model (and effort) instead of the lead's or workers':
+
+```json
+{ "claude": {
+    "leadModel": "opus", "workerModel": "sonnet",
+    "agentModels": {
+      "marlow": { "model": "fable", "effort": "high" },
+      "juniper": { "model": "haiku" } } },
+  "codex": { "agentModels": { "kit": { "model": "gpt-5.1-codex", "effort": "high" } } } }
+```
+
+- The key is the agent's id (`marlow`, `juniper`, `kit`, `wren`, `rowan`, `tove`). The entry beats
+  `leadModel` / `workerModel` (and `--model`, `--lead-model`, `--worker-model`) for that agent; without
+  an `effort` it keeps its role's (`effort`, `leadEffort`). An agent's entry is read from the section of
+  the engine that runs it: `claude` for Claude agents, `codex` for Codex agents.
+- Claude agents take an alias (`opus`, `sonnet`, `haiku`, `fable`: the CLI resolves it to the current
+  model of that family), a Claude model id (`claude-sonnet-5`, a Bedrock or Vertex id) or a Bedrock ARN,
+  and efforts `low`..`max`; Codex agents take any non-Claude model name and efforts `none`, `minimal`,
+  `low`, `medium`, `high`, `xhigh`. Anything else (an unknown agent, `sonet`, a Claude model under
+  `codex`) stops the start with the reason.
+- The console's `/model <agent> <model> [effort]` (`agent.model`, see docs/console.md) sets it while the
+  Foreman runs and saves it here; `/model <agent> default` removes it. The agent's next turn runs it (a
+  running turn finishes on its model); its nameplate, the banner and the feed ("Juniper switched to
+  Sonnet (high, set by Alex)") follow at once. config.json is rewritten atomically (a temp file, then a
+  rename) with every other key kept in its order and two-space JSON; only these entries change, so
+  nothing from the flags or the environment is ever written. A config.json that is not valid JSON is
+  left alone: the change then applies until the Foreman restarts, and the console says it was not saved.
+- Usage limits follow the agent's model (see Usage limits): moved onto a model whose own limit is in
+  force, it waits for that limit; moved off one, it runs at once. A turn already refused by its old
+  model's limit continues right away on the new one. The lead's fallback stands in for the lead's own
+  model, its entry here included: a lead moved onto a limited model runs `claude.leadFallback`
+  meanwhile; moved off it, the fallback ends.
+- `/model` on its own lists every agent's model, effort and where it comes from (`default`, `config`,
+  or `override` = this entry).
 
 ### Permissions and subagents (`claude.permissions`, `claude.subagents`)
 

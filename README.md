@@ -351,6 +351,7 @@ All keys can be rebound in Options, Controls.
 | `/status` | Goal, agents, tasks, decisions, spend and plan usage |
 | `/pause @x`, `/resume @x` | Pause an agent, keeping its task |
 | `/stop @x`, `/spawn @x [task]` | Take an agent off shift, or bring one on |
+| `/model [agent] [model] [effort]` | Show or change an agent's model, e.g. `/model juniper sonnet`, `/model foreman opus` (saved for the next runs) |
 | `/repo add <path>`, `/repos` | Register (any existing folder) and list project folders |
 | `/foreman [start\|restart\|stop\|log]` | The Foreman the game starts: its state, controls and log |
 | `/hud [off\|pill\|pill+\|panel] [position] [s\|m\|l]` | HUD overlay style, position and size |

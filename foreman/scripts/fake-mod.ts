@@ -273,6 +273,8 @@ function onMessage(m: ServerMessage): void {
       break;
     case 'ack':
       if (!m.ok) out(paint('red', `[ack ${m.re}] FAILED: ${m.error}`));
+      // agent.model answers with a line for the player
+      else if (typeof m.result?.text === 'string') out(paint(m.result.saved === false ? 'yellow' : 'green', `[ack ${m.re}] ${m.result.text}`));
       else if (m.result && Object.keys(m.result).length) out(paint('dim', `[ack ${m.re}] ok ${JSON.stringify(m.result)}`));
       break;
     case 'error':
@@ -364,6 +366,11 @@ async function command(line: string): Promise<void> {
     case 'spawn':
       if (!args[0]) return out(`usage: /${cmd} @name`);
       send({ type: 'agent.action', agentId: args[0].replace(/^@/, ''), action: cmd, ...(args[1] ? { arg: args[1] } : {}) });
+      return;
+    case 'model':
+    case 'models':
+      // /model, /model <agent|lead|workers|all>, /model <agent> <model|default> [effort]
+      send({ type: 'agent.model', ...(args[0] ? { agentId: args[0].replace(/^@/, '') } : {}), ...(args[1] ? { model: args[1] } : {}), ...(args[2] ? { effort: args[2] } : {}) });
       return;
     case 'task':
       if (!args[0] || !args[1]) return out('usage: /task <id> cancel|retry|prioritize [n]|reassign <agent>');

@@ -4,8 +4,9 @@
 // can mix them (e.g. a Claude lead with Codex workers).
 import type { ChildProcess } from 'node:child_process';
 import type { EffortLevel } from '@anthropic-ai/claude-agent-sdk';
+import type { AgentModel } from '../config.js';
 import type { PolicyContext, Verdict } from '../policy.js';
-import type { Usage } from '../protocol.js';
+import type { ModelSource, Usage } from '../protocol.js';
 import type { AgentTool, TurnHandle } from './tools.js';
 
 export type EngineId = 'claude' | 'codex';
@@ -103,7 +104,17 @@ export interface Engine {
   readonly id: EngineId;
   /** display name, e.g. "Claude" */
   readonly label: string;
-  model(role: Role): string;
+  /** the model an agent's turns run: its own (config.json <engine>.agentModels), else its role's */
+  model(role: Role, agentId?: string): string;
+  /** the effort an agent's turns run: its own, else its role's; undefined: the engine's own default (Codex) */
+  effort(role: Role, agentId?: string): string | undefined;
+  /** where an agent's model comes from: the built-in default, the launch config, or its own (/model) */
+  modelSource(role: Role, agentId: string): ModelSource;
+  /**
+   * Per-agent models (config.json `<engine id>.agentModels`, the live object the engine reads every
+   * turn): the team changes an entry for the console's /model and saves it to config.json.
+   */
+  readonly agentModels: Record<string, AgentModel>;
   /** how the engine will authenticate, as known before checkAuth (shown while checking) */
   authMode(): string;
   checkAuth(): Promise<AuthCheck>;

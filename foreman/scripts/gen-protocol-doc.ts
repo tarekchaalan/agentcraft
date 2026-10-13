@@ -43,6 +43,7 @@ const ENUMS: Record<string, AnySchema> = {
   RepoMode: P.RepoMode,
   BackendName: P.BackendName,
   AuthStatus: P.AuthStatus,
+  ModelSource: P.ModelSource,
 };
 for (const [name, schema] of Object.entries(ENUMS)) NAMES.set(schema, name);
 
@@ -187,6 +188,7 @@ function build(): string {
   out.push('| `/answer [dN] <n\\|label> [text]` | `decision.answer {decisionId, option, text?}` |');
   out.push('| `/repo add <path>` | `repo.add {path}` |');
   out.push('| `/pause @name`, `/resume @name`, `/stop @name`, `/spawn @name [taskId]` | `agent.action` (spawn: `arg` = task id) |');
+  out.push('| `/model`, `/model <agent\\|lead\\|workers\\|all>`, `/model <agent> <model\\|default> [effort]` | `agent.model {agentId?, model?, effort?}` |');
   out.push('| `/task <id> cancel\\|retry\\|prioritize [n]\\|reassign <agent>` | `task.action` |');
   out.push('');
   return out.join('\n') + '\n';

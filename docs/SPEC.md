@@ -78,6 +78,7 @@ Mod → Foreman
 - `decision.answer` { decisionId, option?, text? }
 - `task.action` { taskId, action: reassign|cancel|retry|prioritize, arg? }
 - `agent.action` { agentId, action: pause|resume|stop|spawn, arg? }
+- `agent.model` { agentId?: agentId|"lead"|"workers"|"all", model?: alias|id|"default", effort? } (list or change models; saved in config.json)
 - `diff.request` { requestId, repoId, worktree }
 - `repo.add` { path }
 

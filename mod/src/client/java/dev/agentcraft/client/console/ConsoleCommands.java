@@ -1,6 +1,9 @@
 package dev.agentcraft.client.console;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import dev.agentcraft.client.decisions.DecisionQueue;
+import dev.agentcraft.client.foreman.ForemanJson;
 import dev.agentcraft.client.foreman.ForemanState;
 import dev.agentcraft.client.foreman.Protocol;
 import dev.agentcraft.client.foreman.Protocol.Agent;
@@ -30,6 +33,8 @@ import org.jspecify.annotations.Nullable;
  * /repo add &lt;path&gt;   /repos         repo.add / list repos
  * /pause|/resume|/stop @x [@y|all] agent.action
  * /spawn @x [taskId]               agent.action spawn
+ * /model [agent|lead|workers|all] [model|default] [effort]
+ *                                  agent.model: list / show / change an agent's model (saved in config.json)
  * /task &lt;id&gt; cancel|retry|prioritize [n]|reassign @x
  * /diff [worktree|@agent]          diff review screen (or a summary)
  * /status /help /decide /clear /sound on|off
@@ -42,8 +47,16 @@ public final class ConsoleCommands {
 
 	// ------------------------------------------------------------------ intents
 
-	public sealed interface Intent permits Goal, Message, Answer, RepoAdd, Repos, AgentAction, TaskAction, ShowDiff, Status, Help, Decide, Clear,
-		Sound, Theme, Hud, ForemanCtl, Invalid, Empty {
+	public sealed interface Intent permits Goal, Message, Answer, RepoAdd, Repos, AgentAction, AgentModels, TaskAction, ShowDiff, Status, Help, Decide,
+		Clear, Sound, Theme, Hud, ForemanCtl, Invalid, Empty {
+	}
+
+	/**
+	 * {@code /model}: {@code target} an agent id, "lead", "workers" or "all" (null: everyone); {@code model} null: show
+	 * them, "default": back to the configured model, else an alias (lower case) or a model id as typed; {@code effort}
+	 * optional (lower case). The Foreman checks the model against each agent's engine.
+	 */
+	public record AgentModels(@Nullable String target, @Nullable String model, @Nullable String effort) implements Intent {
 	}
 
 	/** {@code /foreman [status|start|restart|stop|log]}: the Foreman the game starts (client.launcher.Launcher). */
@@ -117,6 +130,7 @@ public final class ConsoleCommands {
 		new Command("resume", "/resume @agent", "resume a paused or stopped agent"),
 		new Command("stop", "/stop @agent", "take an agent off shift"),
 		new Command("spawn", "/spawn @agent [task]", "bring an agent on shift"),
+		new Command("model", "/model [agent] [model] [effort]", "show or change an agent's model (opus, sonnet, haiku, fable, an id or default; saved)"),
 		new Command("task", "/task <id> cancel|retry|prioritize|reassign", "steer a task"),
 		new Command("repo", "/repo add <path>", "work in a local folder (git or not)"),
 		new Command("repos", "/repos", "list repos"),
@@ -130,6 +144,15 @@ public final class ConsoleCommands {
 
 	private static final List<String> AGENT_ACTIONS = List.of("pause", "resume", "stop", "spawn");
 	private static final List<String> TASK_ACTIONS = List.of("cancel", "retry", "prioritize", "reassign");
+	/** The Claude model aliases /model completes (a full model id works too). */
+	public static final List<String> MODEL_ALIASES = List.of("opus", "sonnet", "haiku", "fable");
+	/** The efforts /model completes per engine; it accepts either list (the Foreman checks the agent's engine). */
+	public static final List<String> CLAUDE_EFFORTS = List.of("low", "medium", "high", "xhigh", "max");
+	public static final List<String> CODEX_EFFORTS = List.of("none", "minimal", "low", "medium", "high", "xhigh");
+	/** /model's group targets, after the agents' names. */
+	private static final List<String> MODEL_GROUPS = List.of("lead", "workers", "all");
+	/** A model name: an alias, a model id or a provider's id; no spaces or shell characters (the Foreman's rule). */
+	private static final java.util.regex.Pattern MODEL_NAME = java.util.regex.Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:@/\\[\\]-]{0,99}");
 
 	// ------------------------------------------------------------------ parse
 
@@ -196,6 +219,7 @@ public final class ConsoleCommands {
 			case "repo" -> parseRepo(rest, args);
 			case "repos" -> new Repos();
 			case "pause", "resume", "stop", "spawn" -> parseAgentAction(cmd, args, s);
+			case "model", "models" -> parseModel(args, s);
 			case "task", "t" -> parseTask(args, s);
 			case "diff" -> parseDiff(args, s);
 			case "status", "st" -> new Status();
@@ -310,6 +334,145 @@ public final class ConsoleCommands {
 			}
 		}
 		return new AgentAction(List.copyOf(ids), action, arg);
+	}
+
+	/**
+	 * {@code /model}, {@code /model <agent|lead|workers|all>}, {@code /model <agent> <model|default> [effort]}. The agent's
+	 * name like @mentions (any case, unique prefix, "@" optional); "foreman" is the lead. A model its agent's engine cannot
+	 * run (a Claude alias for a Codex agent, a non-Claude name for a Claude one) is refused here already, so the preview
+	 * says why; the Foreman checks again (and for groups skips the agents on the other engine).
+	 */
+	private static Intent parseModel(List<String> args, ForemanState s) {
+		if (args.isEmpty()) {
+			return new AgentModels(null, null, null);
+		}
+		if (args.size() > 3) {
+			return new Invalid("usage: /model [agent] [model] [effort], e.g. /model juniper sonnet high");
+		}
+		String target = modelTarget(args.get(0), s);
+		if (target == null) {
+			return new Invalid("no agent named " + args.get(0) + " (an agent, lead, workers or all)");
+		}
+		if (args.size() == 1) {
+			return new AgentModels(target, null, null);
+		}
+		String model = args.get(1);
+		String lower = model.toLowerCase(Locale.ROOT);
+		if (args.size() == 2 && (CLAUDE_EFFORTS.contains(lower) || CODEX_EFFORTS.contains(lower))) {
+			return new Invalid(lower + " is an effort: give the model first, /model " + args.get(0) + " <model> " + lower);
+		}
+		if (lower.equals("default")) {
+			return args.size() == 3 ? new Invalid("default goes back to the configured model and effort: give no effort with it")
+				: new AgentModels(target, "default", null);
+		}
+		if (!MODEL_NAME.matcher(model).matches()) {
+			return new Invalid("'" + model + "' is not a model name (opus, sonnet, haiku, fable or a model id)");
+		}
+		if (MODEL_ALIASES.contains(lower)) {
+			model = lower;
+		}
+		Agent one = modelAgent(target, s);
+		if (one != null && "codex".equals(one.engine()) && isClaudeModel(model)) {
+			return new Invalid(one.name() + " runs on Codex: " + model + " is a Claude model (a Codex model, or default)");
+		}
+		if (one != null && "claude".equals(one.engine()) && !isClaudeModel(model)) {
+			return new Invalid(one.name() + " runs on Claude: " + model + " is not a Claude model (opus, sonnet, haiku, fable or a claude-... id)");
+		}
+		String effort = null;
+		if (args.size() == 3) {
+			effort = args.get(2).toLowerCase(Locale.ROOT);
+			if (!CLAUDE_EFFORTS.contains(effort) && !CODEX_EFFORTS.contains(effort)) {
+				return new Invalid("'" + args.get(2) + "' is not an effort: " + String.join(", ", "codex".equals(one == null ? null : one.engine()) ? CODEX_EFFORTS
+					: CLAUDE_EFFORTS));
+			}
+		}
+		return new AgentModels(target, model, effort);
+	}
+
+	/** /model's target: "lead" (also "foreman"), "workers", "all", or an agent's id; null when nothing matches. */
+	public static @Nullable String modelTarget(String token, ForemanState s) {
+		String t = (token.startsWith("@") ? token.substring(1) : token).toLowerCase(Locale.ROOT);
+		return switch (t) {
+			case "lead", "foreman" -> "lead";
+			case "workers", "worker" -> "workers";
+			case "all", "everyone", "team" -> "all";
+			default -> resolveAgent(t, s, false);
+		};
+	}
+
+	/** The one agent a /model target names (the lead for "lead"), or null for a group. */
+	private static @Nullable Agent modelAgent(@Nullable String target, ForemanState s) {
+		if (target == null || target.equals("workers") || target.equals("all")) {
+			return null;
+		}
+		if (target.equals("lead")) {
+			for (Agent a : s.agents().values()) {
+				if (a.role() == Protocol.AgentRole.LEAD) {
+					return a;
+				}
+			}
+			return null;
+		}
+		return s.agent(target);
+	}
+
+	/** "Juniper", "Marlow" (or "the lead"), "every worker", "everyone". */
+	public static String modelTargetName(@Nullable String target, ForemanState s) {
+		if (target == null || target.equals("all")) {
+			return "everyone";
+		}
+		if (target.equals("workers")) {
+			return "every worker";
+		}
+		Agent a = modelAgent(target, s);
+		return a != null ? a.name() : target.equals("lead") ? "the lead" : target;
+	}
+
+	/** A Claude model: an alias, any spelling of a Claude model id, a Bedrock ARN (the Foreman's rule). */
+	public static boolean isClaudeModel(String model) {
+		String m = model.toLowerCase(Locale.ROOT).replaceAll("\\[[^\\]]*\\]$", "");
+		return MODEL_ALIASES.contains(m) || m.equals("opusplan") || m.equals("best") || m.contains("claude") || m.startsWith("arn:aws:bedrock:");
+	}
+
+	/** The agents of an {@code agent.model} ack's result, in its order; entries it cannot read are left out. */
+	public static List<Protocol.AgentModelInfo> modelInfos(@Nullable JsonObject result) {
+		List<Protocol.AgentModelInfo> out = new ArrayList<>();
+		if (result == null || !result.has("agents") || !result.get("agents").isJsonArray()) {
+			return out;
+		}
+		for (JsonElement el : result.getAsJsonArray("agents")) {
+			try {
+				Protocol.AgentModelInfo i = ForemanJson.read(el, Protocol.AgentModelInfo.class);
+				if (i != null && i.agentId() != null) {
+					out.add(i);
+				}
+			} catch (RuntimeException e) {
+				// a malformed entry from a newer Foreman: skip it
+			}
+		}
+		return out;
+	}
+
+	/** One /model line: "Juniper · Sonnet 5 (high) · set with /model" (the name first, so the console colours it). */
+	public static String modelLine(Protocol.AgentModelInfo i) {
+		StringBuilder b = new StringBuilder(i.name()).append(" · ");
+		if ("codex".equals(i.engine())) {
+			b.append("Codex: ");
+		}
+		b.append(i.label());
+		if (i.effort() != null) {
+			b.append(" (").append(i.effort()).append(')');
+		}
+		b.append(" · ").append(switch (i.source()) {
+			case OVERRIDE -> "set with /model";
+			case CONFIG -> "configured";
+			case DEFAULT -> "default";
+			case UNKNOWN -> "?";
+		});
+		if (i.fallback() != null) {
+			b.append(" · now on ").append(i.fallback()).append(" while its model is at its limit");
+		}
+		return b.toString();
 	}
 
 	private static Intent parseTask(List<String> args, ForemanState s) {
@@ -523,6 +686,10 @@ public final class ConsoleCommands {
 			case RepoAdd r -> "add repo";
 			case Repos r -> "list repos";
 			case AgentAction a -> a.action() + " " + (a.agentIds().size() == 1 ? displayName(a.agentIds().get(0), s) : a.agentIds().size() + " agents");
+			case AgentModels m -> m.model() == null ? (m.target() == null || m.target().equals("all") ? "show every agent's model"
+				: m.target().equals("workers") ? "show the workers' models" : "show " + modelTargetName(m.target(), s) + "'s model")
+				: modelTargetName(m.target(), s) + " → " + (m.model().equals("default") ? "the configured model" : m.model()
+					+ (m.effort() != null ? " (" + m.effort() + ")" : "")) + ", saved";
 			case TaskAction t -> t.action() + " " + t.taskId();
 			case ShowDiff d -> "diff " + d.worktree();
 			case Status st -> "show status";
@@ -591,6 +758,28 @@ public final class ConsoleCommands {
 					agentCompletions(out, ts, cursor, lower.startsWith("@") ? lower.substring(1) : lower, s, false, " ");
 				} else if (argIndex == 2) {
 					taskCompletions(out, ts, cursor, lower, s, true);
+				}
+			}
+			case "/model", "/models" -> {
+				// the agent (or a group), then a model its engine runs (Codex: its own names, so only default), then an effort
+				Agent one = argIndex > 1 ? modelAgent(modelTarget(before.get(1), s), s) : null;
+				boolean codex = one != null && "codex".equals(one.engine());
+				if (argIndex == 1) {
+					modelTargetCompletions(out, ts, cursor, lower.startsWith("@") ? lower.substring(1) : lower, s);
+				} else if (argIndex == 2) {
+					List<String> models = new ArrayList<>(codex ? List.of() : MODEL_ALIASES);
+					models.add("default");
+					for (String m : models) {
+						if (m.startsWith(lower) && !m.equals(lower)) {
+							out.add(new Completion(ts, cursor, m + " ", m, m.equals("default") ? "back to the configured model" : "Claude " + m, null, null));
+						}
+					}
+				} else if (argIndex == 3 && !before.get(2).equalsIgnoreCase("default")) {
+					for (String e : codex ? CODEX_EFFORTS : CLAUDE_EFFORTS) {
+						if (e.startsWith(lower) && !e.equals(lower)) {
+							out.add(new Completion(ts, cursor, e, e, "effort", null, null));
+						}
+					}
 				}
 			}
 			case "/answer", "/a" -> {
@@ -687,6 +876,21 @@ public final class ConsoleCommands {
 		}
 		if (withAll && "all".startsWith(prefix) && !prefix.isEmpty()) {
 			out.add(new Completion(start, end, "@all" + suffix, "all", "everyone on shift", null, null));
+		}
+	}
+
+	/** /model's first word: an agent (bare name, its model badge as the detail) or a group. */
+	private static void modelTargetCompletions(List<Completion> out, int start, int end, String prefix, ForemanState s) {
+		for (Agent a : s.agents().values()) {
+			if (a.id().startsWith(prefix) || a.name().toLowerCase(Locale.ROOT).startsWith(prefix)) {
+				String detail = a.model() != null ? a.model() : a.isActive() ? a.activity() : "off shift";
+				out.add(new Completion(start, end, a.name().toLowerCase(Locale.ROOT) + " ", a.name(), detail, a.id(), a.isPaused() ? "idle" : a.state().family()));
+			}
+		}
+		for (String g : MODEL_GROUPS) {
+			if (g.startsWith(prefix)) {
+				out.add(new Completion(start, end, g + " ", g, g.equals("lead") ? "the lead" : g.equals("workers") ? "every worker" : "everyone", null, null));
+			}
 		}
 	}
 
@@ -839,6 +1043,11 @@ public final class ConsoleCommands {
 				m.put("agents", a.agentIds());
 				m.put("action", a.action());
 				m.put("arg", a.arg());
+			}
+			case AgentModels am -> {
+				m.put("target", am.target());
+				m.put("model", am.model());
+				m.put("effort", am.effort());
 			}
 			case TaskAction t -> {
 				m.put("taskId", t.taskId());
