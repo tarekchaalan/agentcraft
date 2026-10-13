@@ -48,6 +48,22 @@ describe('loadConfig argument checking', () => {
     expect(cfg.sim.speed).toBe(2);
   });
 
+  it('preserves every repeated repo flag passed by the Unix launcher', () => {
+    const cfg = load(['--backend', 'sim', '--repo', '/repos/first', '--repo', '/repos/second']);
+    expect(cfg.repos).toEqual(['/repos/first', '/repos/second']);
+  });
+
+  it('accepts repeated equals-form repo flags and legacy comma-separated lists together', () => {
+    const cfg = load(['--repo=/repos/first', '--repo', ' /repos/second, /repos/third, ', '--repo=/repos/fourth']);
+    expect(cfg.repos).toEqual(['/repos/first', '/repos/second', '/repos/third', '/repos/fourth']);
+  });
+
+  it('continues to use the final value for non-repeatable flags', () => {
+    const cfg = load(['--backend', 'claude', '--backend=sim', '--port', '41000', '--port=41001']);
+    expect(cfg.backend).toBe('sim');
+    expect(cfg.port).toBe(41001);
+  });
+
   // regression: PowerShell `-File launch.ps1 -ForemanArgs '--workers,juniper,kit,--model,sonnet'` hands
   // the Foreman ONE argument; it used to be ignored silently and the team started on opus/medium/3 workers
   it('refuses an argument that PowerShell joined with commas', () => {

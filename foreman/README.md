@@ -84,7 +84,7 @@ most ~100 ms of state, and interrupted agent turns resume on the next start.
 | `--use-claude-login` / `AGENTCRAFT_USE_CLAUDE_LOGIN=1` / config `claude.useClaudeLogin` | off | personal use only: your `claude` CLI login instead of an API key. Any `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` or `CLAUDE_CODE_USE_*` switch in the shell is withheld from the agents; `foreman.status.authMode` reads `claude login` |
 | `--user-name` / `AGENTCRAFT_USER_NAME` / config `userName` | OS user name | how the agents address you; sent to the mod in `foreman.status` |
 | `--profile` | backend name | state lives in `<home>/<profile>` |
-| `--repo <path>[,<path>]` | | register repos at start (sim: a fresh `sandbox/sim-demo`) |
+| `--repo <path>[,<path>]` | | register repos at start; repeatable (sim: a fresh `sandbox/sim-demo`) |
 | `--goal "<text>"` | | submit a goal right away |
 | `--reset` | | wipe this profile first |
 | `--notify` / `--no-notify` / `AGENTCRAFT_NOTIFY` | on for claude, off for sim | Windows, macOS or Linux (`notify-send`) notifications |
