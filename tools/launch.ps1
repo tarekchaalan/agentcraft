@@ -422,6 +422,9 @@ if ($liveGame) {
         AGENTCRAFT_FOCUS    = $(if ($Dev) { '0' } else { '1' })
     }
     if ($Seed) { $gameEnv.AGENTCRAFT_WORLD_SEED = $Seed }
+    # The mod's Foreman launcher finds the Foreman started (or reused) above and leaves it alone. -NoForeman means
+    # "I start my own": the launcher stays off then, unless the caller set AGENTCRAFT_LAUNCHER (1 = let the game start it).
+    if ($NoForeman) { $gameEnv.AGENTCRAFT_LAUNCHER = $(if ($env:AGENTCRAFT_LAUNCHER) { $env:AGENTCRAFT_LAUNCHER } else { '0' }) }
     # cmd.exe /s /c "<gradlew.bat> args": a .bat cannot be spawned directly; the arguments are fixed
     # (no user text), quoted per argument and passed verbatim
     $inner = Join-CmdArgs (@((Join-Path $L.Mod 'gradlew.bat')) + $gargs)

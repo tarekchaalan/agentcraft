@@ -43,7 +43,11 @@ public final class ConsoleCommands {
 	// ------------------------------------------------------------------ intents
 
 	public sealed interface Intent permits Goal, Message, Answer, RepoAdd, Repos, AgentAction, TaskAction, ShowDiff, Status, Help, Decide, Clear,
-		Sound, Theme, Hud, Invalid, Empty {
+		Sound, Theme, Hud, ForemanCtl, Invalid, Empty {
+	}
+
+	/** {@code /foreman [status|start|restart|stop|log]}: the Foreman the game starts (client.launcher.Launcher). */
+	public record ForemanCtl(String action) implements Intent {
 	}
 
 	/** {@code repoId} null = the Foreman's default; {@code choices} non-empty = ask which repo first. */
@@ -118,6 +122,7 @@ public final class ConsoleCommands {
 		new Command("repos", "/repos", "list repos"),
 		new Command("status", "/status", "goal, agents, tasks and decisions"),
 		new Command("theme", "/theme dark|light", "dark or light screens and HUD"),
+		new Command("foreman", "/foreman [start|restart|stop|log]", "the Foreman the game starts: what it is doing, start / restart / stop, open its log"),
 		new Command("sound", "/sound on|off", "decision bell and done chime"),
 		new Command("hud", "/hud off|pill|pill+|panel [position] [s|m|l]", "the HUD overlay style, position and size"),
 		new Command("clear", "/clear", "clear the console's own lines"),
@@ -207,8 +212,20 @@ public final class ConsoleCommands {
 				HudCommand.Parsed p = HudCommand.parse(rest);
 				yield p.ok() ? new Hud(p.change()) : new Invalid(p.error());
 			}
+			case "foreman", "fm" -> parseForeman(args);
 			case "goal" -> rest.isEmpty() ? new Invalid("type the goal after /goal") : goal(rest, s);
 			default -> new Invalid("unknown command /" + cmd + " (/help lists them)");
+		};
+	}
+
+	private static Intent parseForeman(List<String> args) {
+		if (args.isEmpty()) {
+			return new ForemanCtl("status");
+		}
+		String a = args.get(0).toLowerCase(Locale.ROOT);
+		return switch (a) {
+			case "status", "st", "start", "restart", "stop", "log" -> new ForemanCtl(a.equals("st") ? "status" : a);
+			default -> new Invalid("/foreman, or /foreman start | restart | stop | log");
 		};
 	}
 
@@ -514,6 +531,7 @@ public final class ConsoleCommands {
 			case Clear c -> "clear console";
 			case Sound so -> so.on() == null ? "sound status" : so.on() ? "sound on" : "sound off";
 			case Hud h -> HudCommand.describe(h.change());
+			case ForemanCtl f -> "foreman " + f.action();
 			case Invalid i -> null;
 			case Empty e -> null;
 		};
@@ -835,6 +853,7 @@ public final class ConsoleCommands {
 			case Decide d -> m.put("decisionId", d.decisionId());
 			case Sound so -> m.put("on", so.on());
 			case Hud h -> m.put("hud", HudCommand.describe(h.change()));
+			case ForemanCtl f -> m.put("action", f.action());
 			case Invalid i -> m.put("error", i.error());
 			default -> {
 			}

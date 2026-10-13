@@ -97,9 +97,25 @@ dependencies {
 	}
 }
 
+// The checkout this jar is built from, as a resource: the Foreman launcher's last-resort source when neither
+// AGENTCRAFT_FOREMAN_DIR nor launcher.foremanDir is set (mod/DEV.md "Foreman launcher"). A path only, no commit: the
+// launcher asks git for the checkout's commit when it starts.
+def buildInfoDir = layout.buildDirectory.dir("generated/agentcraft-build")
+def buildCheckout = rootProject.projectDir.parentFile.absolutePath
+def buildInfo = tasks.register("agentcraftBuildInfo") {
+	inputs.property "checkout", buildCheckout
+	outputs.dir buildInfoDir
+	doLast {
+		def f = buildInfoDir.get().file("agentcraft-build.properties").asFile
+		f.parentFile.mkdirs()
+		f.text = "# the checkout this jar was built from (the Foreman launcher's fallback source)\ncheckout=" + buildCheckout.replace('\\', '\\\\') + "\n"
+	}
+}
+
 processResources {
 	def version = project.version
 	inputs.property "version", version
+	from(buildInfo)
 
 	filesMatching("fabric.mod.json") {
 		expand "version": version
@@ -155,9 +171,10 @@ tasks.register("mcSources", Sync) {
 	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
-// MP-F: JUnit 5 tests for common contracts and client registry seams.
+// Unit tests (src/test/java, JUnit 5) for pure logic without a game: the Foreman launcher's decisions
+// (dev.agentcraft.launcher), and (MP-F) common contracts and client registry seams.
 dependencies {
-    testImplementation platform('org.junit:junit-bom:5.13.4')
+    testImplementation platform("org.junit:junit-bom:${project.junit_version}")
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
@@ -165,6 +182,10 @@ sourceSets.test.compileClasspath += sourceSets.client.output + sourceSets.client
 sourceSets.test.runtimeClasspath += sourceSets.client.output + sourceSets.client.runtimeClasspath
 test {
     useJUnitPlatform()
+    testLogging {
+        events "failed"
+        exceptionFormat "full"
+    }
     def work = layout.buildDirectory.dir("test-work")
     workingDir work
     doFirst { work.get().asFile.mkdirs() }

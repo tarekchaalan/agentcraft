@@ -1,5 +1,6 @@
 package dev.agentcraft.client.hud;
 
+import dev.agentcraft.client.ClientEnv;
 import dev.agentcraft.client.foreman.Foreman;
 import dev.agentcraft.client.foreman.ForemanState;
 import dev.agentcraft.client.foreman.LinkStatus;
@@ -8,6 +9,8 @@ import dev.agentcraft.client.foreman.Protocol.AuthStatus;
 import dev.agentcraft.client.foreman.Protocol.BackendName;
 import dev.agentcraft.client.foreman.Protocol.ForemanStatus;
 import dev.agentcraft.client.foreman.UsageText;
+import dev.agentcraft.client.launcher.Launcher;
+import dev.agentcraft.client.launcher.LauncherHints;
 import dev.agentcraft.client.ui.Kit;
 import dev.agentcraft.client.ui.Panels;
 import dev.agentcraft.client.ui.TextUtil;
@@ -15,6 +18,7 @@ import dev.agentcraft.client.ui.UiStyle;
 import dev.agentcraft.hud.HudLayout;
 import dev.agentcraft.hud.HudLayout.Env;
 import dev.agentcraft.hud.HudLayout.Rect;
+import dev.agentcraft.launcher.LauncherPlan.State;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
@@ -33,7 +37,9 @@ import net.minecraft.util.Util;
  *       seconds;</li>
  *   <li>reconnecting (it was connected): clay pulsing dot, "Reconnecting to the Foreman", attempt
  *       count, and "showing last known state";</li>
- *   <li>never connected: grey dot, "Foreman not running" + how to start it;</li>
+ *   <li>not linked: what the mod's Foreman launcher is doing ({@link LauncherHints}: looking, installing, starting,
+ *       crashed, how to start one); it also replaces "Reconnecting" when it knows more (ours crashed or was stopped);</li>
+ *   <li>linked to a Foreman the game did not start from this checkout and commit: "running (older version)";</li>
  *   <li>auth failed: paper banner with a red dot and the Foreman's message.</li>
  * </ul>
  */
@@ -83,21 +89,30 @@ public final class ConnectionBanner implements HudElement {
 			dot = fs != null && fs.auth() == AuthStatus.FAILED ? "error" : fs != null && fs.auth() == AuthStatus.CHECKING ? "thinking" : "working";
 			title = "Foreman · " + backendLabel(fs);
 			String account = fs != null && fs.backend() != BackendName.SIM ? fs.account() : null;
+			if (Launcher.state() == State.RUNNING_OLDER) {
+				// a Foreman the game did not start, from another checkout or commit: used, never stopped (/foreman says
+				// why). Said first, so a narrow pill shortens the account rather than this.
+				account = "running (older version)" + (account == null || account.isBlank() ? "" : " · " + account);
+			}
 			// plan windows next to the account, kept short: the first two ("5h 62% · 7d 34%")
 			String usage = fs == null || fs.backend() == BackendName.SIM ? null : UsageText.summary(st, 2);
 			detail = fitDetail(font, account, usage, detailBudget(g.guiWidth()));
 			if (now - link.sinceMs() > FADE_AFTER_MS) {
 				alpha = 150;
 			}
-		} else if (link.everSynced()) {
+		} else if (link.everSynced() && !LauncherHints.overridesReconnect(Launcher.state())) {
 			dot = "waiting";
 			pulse = true;
 			title = "Reconnecting to the Foreman" + (link.attempt() > 1 ? " (" + link.attempt() + ")" : "");
 			detail = "showing last known state";
 		} else {
-			dot = "idle";
-			title = "Foreman not running";
-			detail = "start it: cd foreman; npm run start";
+			// not linked: what the mod's Foreman launcher is doing (mod/DEV.md "Foreman launcher")
+			State ls = Launcher.state();
+			boolean busy = ls == State.CHECKING || ls == State.STARTING || ls == State.INSTALLING || ls == State.RUNNING || ls == State.RUNNING_OLDER;
+			dot = busy ? "thinking" : ls == State.CRASHED ? "error" : "idle";
+			pulse = busy;
+			title = LauncherHints.title(ls);
+			detail = LauncherHints.detail(ls, ClientEnv.DEV_RUN, Keys.console == null ? "`" : Keys.label(Keys.console));
 		}
 		Env env = HudEnv.forPill(mc, g.guiWidth(), g.guiHeight());
 		drawPill(g, font, env, dot, title, detail, alpha, pulse, now);
@@ -195,7 +210,7 @@ public final class ConnectionBanner implements HudElement {
 			case CLAUDE -> "Claude backend can't authenticate";
 			default -> "Agent backend can't authenticate";
 		};
-		String msg = fs.message() != null ? fs.message() : "run `claude` and /login, then restart the Foreman";
+		String msg = fs.message() != null ? fs.message() : LauncherHints.authFailed(Launcher.ours());
 		Kit.Padding p = Kit.padding("panel_paper");
 		int frame = 34 + p.left() + p.right() - 16;
 		int wantW = Math.min(360, Math.max(font.width(head), font.width(msg)) + frame);

@@ -19,6 +19,9 @@ export interface RunInfo {
   profile: string;
   version: string;
   startedAt: string;
+  /** the checkout this Foreman runs from, and its commit at start (the mod's launcher compares them to tell a stale Foreman) */
+  root?: string;
+  commit?: string;
 }
 
 export function profileRunFile(dataDir: string): string {
