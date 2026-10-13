@@ -191,6 +191,8 @@ function Send-CtrlBreak([int]$ProcessId) {
 # redirection uses ShellExecute (nothing inherited) and gives the wrapper its own hidden console;
 # the wrapper opens the logs and runs the command in that console (Ctrl+Break target for stop.ps1).
 # Returns @{wrapperPid; wrapperStart; pid; start} (pid = the real command).
+# $script:AcBgStarting holds @{pid; start} of the wrapper from the moment it exists until the caller
+# has recorded it (the caller clears it), so a launch interrupted in between can still stop it.
 function Start-Bg($L, [string]$NodeExe, [string]$Name, [string]$Command, [string[]]$Arguments, [string]$Cwd,
                   [string]$Log, [string]$ErrLog, [hashtable]$Env, [switch]$Verbatim) {
     $statusFile = Join-Path $L.Run "bg-$Name.status.json"
@@ -203,6 +205,7 @@ function Start-Bg($L, [string]$NodeExe, [string]$Name, [string]$Command, [string
     Write-JsonFile $specFile ([ordered]@{ command = $Command; args = @($Arguments); cwd = $Cwd; log = $Log; errLog = $ErrLog; env = $Env; verbatim = [bool]$Verbatim; statusFile = $statusFile })
     $w = Start-Process -FilePath $NodeExe -ArgumentList (Join-CmdArgs @((Join-Path $L.Tools 'lib\bgrun.mjs'), $specFile)) -WorkingDirectory $Cwd -WindowStyle Hidden -PassThru
     $wStart = Get-ProcStart $w.Id
+    $script:AcBgStarting = @{ pid = $w.Id; start = $wStart; name = $Name }
     $deadline = (Get-Date).AddSeconds(20)
     $st = $null
     while ((Get-Date) -lt $deadline) {
@@ -215,6 +218,7 @@ function Start-Bg($L, [string]$NodeExe, [string]$Name, [string]$Command, [string
         $why = 'no status from the wrapper'
         if ($st -and $st.error) { $why = $st.error }
         if (-not $w.HasExited) { Stop-OwnTree $w.Id $wStart | Out-Null }
+        $script:AcBgStarting = $null
         throw "could not start $Name ($Command): $why"
     }
     return [ordered]@{ wrapperPid = $w.Id; wrapperStart = $wStart; pid = [int]$st.childPid; start = (Get-ProcStart ([int]$st.childPid)) }
@@ -332,6 +336,6 @@ function Write-Warn2([string]$Text) { Write-Host "  ! $Text" -ForegroundColor Ye
 function Write-Fail([string]$Text) { Write-Host "  x $Text" -ForegroundColor Red }
 
 function Get-LogTail([string]$Path, [int]$Lines = 25) {
-    if (-not (Test-Path $Path)) { return @() }
-    try { return @(Get-Content -Tail $Lines -Path $Path -ErrorAction Stop) } catch { return @() }
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return @() }
+    try { return @(Get-Content -Tail $Lines -LiteralPath $Path -ErrorAction Stop) } catch { return @() }
 }

@@ -13,6 +13,9 @@
   -StopDaemon also stops the Gradle daemon(s) launch.ps1 started for this checkout (they carry a
   per-checkout marker in their JVM args); other checkouts' daemons are never touched.
 
+  Exit codes: 0 everything asked for is stopped (or there was nothing to stop); 1 something is still
+  running, or the -FromSummary file cannot be read.
+
 .EXAMPLE
   tools\stop.ps1                 # game + every Foreman this checkout's launch.ps1 started
   tools\stop.ps1 -Game           # only the game (agents keep working)
@@ -33,9 +36,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib\procs.ps1')
+. (Join-Path $PSScriptRoot 'lib\checks.ps1')
 $Root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $L = Get-AcLayout $Root
-$node = Get-Command node -ErrorAction SilentlyContinue
+$node = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
 
 $doGame = $Game.IsPresent -or -not $Foreman.IsPresent
 $doForeman = $Foreman.IsPresent -or -not $Game.IsPresent
@@ -96,11 +100,13 @@ if ($doGame) {
                     }
                 }
                 if ($owner -eq $gamePid -and $node) {
+                    # captured, not `& node ... 2>$null`: Windows PowerShell 5.1 would turn the CLI's stderr into an error
+                    $cli = Join-Path $L.Tools 'devbridge-cli.mjs'
                     $hung = $false
-                    try { $hung = [bool]((& $node.Source (Join-Path $L.Tools 'devbridge-cli.mjs') ping --port ([int]$g.devPort) --timeout 5 2>$null | Out-String | ConvertFrom-Json).stalled) } catch {}
+                    try { $hung = [bool]((Invoke-Captured $node.Source @($cli, 'ping', '--port', [string]$g.devPort, '--timeout', '5') 20).stdout | ConvertFrom-Json).stalled } catch {}
                     if ($hung) { Write-Warn2 'the game is hung (render thread stalled): dev.quit saves the world and force-exits it after 15 s' }
                     Write-Kv 'game' "dev.quit via DevBridge :$($g.devPort) (pid $gamePid; saves the world) ..."
-                    $q = (& $node.Source (Join-Path $L.Tools 'devbridge-cli.mjs') quit --port ([int]$g.devPort) --timeout 10 2>$null) | Out-String
+                    $q = (Invoke-Captured $node.Source @($cli, 'quit', '--port', [string]$g.devPort, '--timeout', '10') 120).stdout
                     if (Wait-ProcExit $gamePid $gameStart ([Math]::Max($TimeoutSec, 25))) {
                         $how = 'graceful'
                         if ($hung) { $how = 'dev.quit watchdog, world saved' }
@@ -146,7 +152,7 @@ if ($doGame) {
 
 # --- Foreman(s) -------------------------------------------------------------------------------------
 if ($doForeman) {
-    $files = @(Get-ChildItem -Path $L.Run -Filter 'foreman-*.json' -ErrorAction SilentlyContinue)
+    $files = @(Get-ChildItem -LiteralPath $L.Run -Filter 'foreman-*.json' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '\.(spec|status)\.json$' })
     $matched = 0
     foreach ($file in $files) {
         $f = Read-JsonFile $file.FullName

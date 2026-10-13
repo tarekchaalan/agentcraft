@@ -25,6 +25,9 @@
 
   Every run is logged to artifacts\logs\start-<timestamp>.log.
 
+  Exit codes: 0 ok, 1 a requirement is missing or an argument is wrong, 2 you quit, 3 the launch
+  failed (tools\launch.ps1 says why), 4 unexpected error.
+
 .PARAMETER World
   studio or survival. Asked when not given.
 .PARAMETER Repo
@@ -41,7 +44,8 @@
 .PARAMETER NoInstall
   Never install anything: report what is missing and stop.
 .PARAMETER LaunchArgs
-  Extra arguments passed through to tools\launch.ps1, e.g. -LaunchArgs '-Dev','-Seed','1234'.
+  Extra arguments passed through to tools\launch.ps1, e.g. -LaunchArgs '-Dev','-Seed','1234'. Their
+  names are checked against launch.ps1's parameters before anything is installed.
 
 .EXAMPLE
   start-agentcraft.cmd                       # asks everything
@@ -65,7 +69,8 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest's progress bar makes PS 5.1 downloads crawl
 
-# Exit codes: 0 ok, 1 a requirement is missing, 2 you quit, 3 the launch failed, 4 unexpected error.
+# Exit codes: 0 ok, 1 a requirement is missing or an argument is wrong, 2 you quit, 3 the launch
+# failed, 4 unexpected error. (130: Ctrl+C while tools\launch.ps1 was starting things.)
 $script:ExitCode = 0
 $script:Interactive = -not $Yes
 $script:Transcript = $false
@@ -76,6 +81,14 @@ $Root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $Launcher = Join-Path $Root 'tools\launch.ps1'
 $Logs = Join-Path (Join-Path $Root 'artifacts') 'logs'
 $UserPrograms = Join-Path $env:LOCALAPPDATA 'Programs'
+
+# Java 25 discovery, version parsing and captured tool runs, shared with tools\launch.ps1
+$ChecksLib = Join-Path $Root 'tools\lib\checks.ps1'
+if (-not (Test-Path -LiteralPath $ChecksLib)) {
+    Write-Host "  x This does not look like a complete AgentCraft checkout ($Root): tools\lib\checks.ps1 is missing. Clone the repository again." -ForegroundColor Red
+    exit 1
+}
+. $ChecksLib
 
 # --- output helpers ------------------------------------------------------------------------------
 
@@ -196,23 +209,10 @@ function Get-Cmd([string]$Name) {
 }
 
 function Invoke-Tool([string]$Exe, [string[]]$Arguments, [int]$TimeoutSec = 60) {
-    # Runs a console tool, returns @{ code; out } without letting its stderr become a PowerShell error.
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $Exe
-    $psi.Arguments = ($Arguments | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ } }) -join ' '
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
-    $p = [System.Diagnostics.Process]::Start($psi)
-    $out = $p.StandardOutput.ReadToEndAsync()
-    $err = $p.StandardError.ReadToEndAsync()
-    if (-not $p.WaitForExit($TimeoutSec * 1000)) {
-        try { $p.Kill() } catch {}
-        return @{ code = -1; out = "timed out after ${TimeoutSec}s" }
-    }
-    $p.WaitForExit()
-    return @{ code = $p.ExitCode; out = (($out.Result + "`n" + $err.Result).Trim()) }
+    # Runs a console tool, returns @{ code; out } without letting its stderr become a PowerShell error
+    # (tools\lib\checks.ps1 Invoke-Captured: quoted arguments, timeout, Ctrl+C kills it).
+    $r = Invoke-Captured $Exe $Arguments $TimeoutSec
+    return @{ code = $r.code; out = $r.out }
 }
 
 function Invoke-Visible([string]$Exe, [string[]]$Arguments, [string]$Cwd = $Root) {
@@ -336,7 +336,7 @@ function Invoke-Winget([string]$Id, [string]$What) {
 function Test-Checkout {
     Write-Head 'Checking this checkout'
     $missing = @()
-    foreach ($rel in @('tools\launch.ps1', 'tools\lib\procs.ps1', 'mod\gradlew.bat', 'mod\build.gradle', 'foreman\package.json', 'tools\package.json')) {
+    foreach ($rel in @('tools\launch.ps1', 'tools\stop.ps1', 'tools\lib\procs.ps1', 'tools\lib\checks.ps1', 'tools\lib\bgrun.mjs', 'mod\gradlew.bat', 'mod\build.gradle', 'foreman\package.json', 'tools\package.json')) {
         if (Test-Path -LiteralPath (Join-Path $Root $rel)) { continue }
         $missing += $rel
     }
@@ -390,8 +390,9 @@ function Get-NodeMajor {
     $node = Get-Cmd 'node'
     if (-not $node) { return @{ major = 0; version = ''; path = '' } }
     $v = Invoke-Tool $node @('--version') 15
-    if ($v.code -ne 0 -or $v.out -notmatch '^v(\d+)\.') { return @{ major = 0; version = $v.out; path = $node } }
-    return @{ major = [int]$Matches[1]; version = $v.out; path = $node }
+    $nv = Test-NodeVersion $v.out 22
+    if ($v.code -ne 0 -or $nv.major -eq 0) { return @{ major = 0; version = $v.out; path = $node } }
+    return @{ major = $nv.major; version = $nv.version; path = $node }
 }
 
 function Install-NodePortable {
@@ -462,52 +463,16 @@ function Resolve-Node {
     }
 }
 
-function Get-JdkVersion([string]$Name) {
-    # "jdk-25.0.4.1+1" -> 25.0.4.1 ; "jdk-25+36" -> 25.0 ; "zulu25.30.17-ca-jdk25.0.1-win_x64" -> 25.0.1
-    $v = $Name
-    if ($v -match '(\d+(?:\.\d+)+)') { $v = $Matches[1] } elseif ($v -match '(\d+)') { $v = $Matches[1] } else { return [version]'0.0' }
-    if ($v -notmatch '\.') { $v += '.0' }
-    try { return [version]$v } catch { return [version]'0.0' }
-}
-
 function Test-JavaHome([string]$JdkHome) {
-    # Returns the major version of the JDK at $JdkHome, or 0.
-    if (-not $JdkHome) { return 0 }
-    $exe = Join-Path $JdkHome 'bin\java.exe'
-    if (-not (Test-Path -LiteralPath $exe)) { return 0 }
-    $r = Invoke-Tool $exe @('-version') 20
-    if ($r.out -match 'version "(\d+)') { return [int]$Matches[1] }
-    return 0
+    # Returns the major version of the JDK at $JdkHome, or 0 (tools\lib\checks.ps1).
+    return (Get-JavaHomeMajor $JdkHome)
 }
 
 function Find-Jdk25 {
     # The JDK to use: JAVA_HOME if it is 25+, else the newest 25+ in the usual places, else java on PATH.
-    if ((Test-JavaHome $env:JAVA_HOME) -ge 25) { return $env:JAVA_HOME }
-    $roots = @(
-        (Join-Path $UserPrograms 'Eclipse Adoptium'),
-        "$env:ProgramFiles\Eclipse Adoptium",
-        "$env:ProgramFiles\Java",
-        "$env:ProgramFiles\Microsoft",
-        "$env:ProgramFiles\Zulu",
-        "$env:ProgramFiles\Amazon Corretto",
-        (Join-Path $env:USERPROFILE '.jdks')
-    )
-    $found = @()
-    foreach ($r in $roots) {
-        if (-not (Test-Path -LiteralPath $r)) { continue }
-        foreach ($d in (Get-ChildItem -LiteralPath $r -Directory -ErrorAction SilentlyContinue)) {
-            if ((Get-JdkVersion $d.Name).Major -lt 25) { continue }
-            if (Test-Path -LiteralPath (Join-Path $d.FullName 'bin\java.exe')) { $found += $d }
-        }
-    }
-    foreach ($d in ($found | Sort-Object { Get-JdkVersion $_.Name } -Descending)) {
-        if ((Test-JavaHome $d.FullName) -ge 25) { return $d.FullName }
-    }
-    $java = Get-Cmd 'java'
-    if ($java) {
-        $jh = Split-Path -Parent (Split-Path -Parent $java)
-        if ((Test-JavaHome $jh) -ge 25) { return $jh }
-    }
+    # The same search tools\launch.ps1 does (tools\lib\checks.ps1 Find-Jdk).
+    $j = Find-Jdk 25
+    if ($j) { return $j.home }
     return $null
 }
 
@@ -693,14 +658,67 @@ function Resolve-Backend {
 
 # --- repo and world ------------------------------------------------------------------------------
 
+function Get-GivenRepos {
+    # -Repo as given (one or more, or comma-separated from the .cmd), as full paths; each must be a folder.
+    $out = @()
+    foreach ($r in @($Repo | Where-Object { $_ } | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+        try { $full = [System.IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($r)) }
+        catch { Quit 1 "-Repo '$r' is not a valid path: $($_.Exception.Message)" }
+        if (-not (Test-Path -LiteralPath $full -PathType Container)) { Quit 1 "-Repo $full is not an existing folder" }
+        $out += $full
+    }
+    return $out
+}
+
+function Get-LauncherParams {
+    # The parameter names (and aliases) tools\launch.ps1 accepts, lower-case -> its own spelling.
+    $names = @{}
+    try {
+        $cmd = Get-Command -Name $Launcher -ErrorAction Stop
+        foreach ($p in $cmd.Parameters.Values) {
+            if ($p.Name -eq 'UnknownArgs') { continue }
+            $names[$p.Name.ToLowerInvariant()] = $p.Name
+            foreach ($a in @($p.Aliases)) { $names[([string]$a).ToLowerInvariant()] = $p.Name }
+        }
+    }
+    catch { Write-Warn2 "could not read tools\launch.ps1's parameters ($($_.Exception.Message)); -LaunchArgs is passed unchecked" }
+    return $names
+}
+
+function Resolve-LaunchArgs {
+    # -LaunchArgs '-Dev','-Seed','1234' -> ordered @{ Dev = $true; Seed = '1234' }, checked against
+    # tools\launch.ps1's parameters before anything is installed or asked. A token starting with '-'
+    # names a parameter, the next token (unless it is another '-name') is its value, otherwise it is a
+    # switch. Started with -File (or from the .cmd) the list arrives as one comma-joined string, so
+    # split on commas.
+    $out = [ordered]@{}
+    if (-not $LaunchArgs) { return $out }
+    $known = Get-LauncherParams
+    $tokens = @($LaunchArgs | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    for ($i = 0; $i -lt $tokens.Count; $i++) {
+        $tok = [string]$tokens[$i]
+        if ($tok -notmatch '^-([A-Za-z][A-Za-z0-9]*)$') { Quit 1 "-LaunchArgs: expected a -Name before '$tok'" }
+        $name = $Matches[1]
+        if ($known.Count) {
+            $lower = $name.ToLowerInvariant()
+            if ($known.ContainsKey($lower)) { $name = $known[$lower] }
+            else {
+                # an unambiguous abbreviation, as PowerShell itself allows (-Dry for -DryRun)
+                $hits = @($known.Keys | Where-Object { $_.StartsWith($lower) } | ForEach-Object { $known[$_] } | Select-Object -Unique)
+                if ($hits.Count -ne 1) { Quit 1 "-LaunchArgs: tools\launch.ps1 has no parameter -$name (see tools\README.md)" }
+                $name = $hits[0]
+            }
+        }
+        if ($i + 1 -lt $tokens.Count -and ([string]$tokens[$i + 1]) -notmatch '^-[A-Za-z]') { $out[$name] = $tokens[$i + 1]; $i++ }
+        else { $out[$name] = $true }
+    }
+    return $out
+}
+
 function Resolve-Repos {
     Write-Head 'Repository for the agents'
     $out = @()
-    $given = @()
-    if ($Repo) { $given = $Repo }
-    foreach ($r in $given) {
-        $full = [System.IO.Path]::GetFullPath($r)
-        if (-not (Test-Path -LiteralPath $full -PathType Container)) { Quit 1 "-Repo $full is not an existing folder" }
+    foreach ($full in @(Get-GivenRepos)) {
         $out += $full
         Write-Ok "repo: $full"
     }
@@ -749,6 +767,9 @@ try {
     Write-Host "  log: $logFile" -ForegroundColor DarkGray
 
     Test-Checkout
+    # the arguments for later, checked now: nothing is installed or asked before they are known to be good
+    $launchExtra = Resolve-LaunchArgs
+    $null = Get-GivenRepos
     Update-SessionPath
     if (Get-Winget) { Write-Ok 'winget: available for installs' } else { Write-Info 'winget not found; installs use portable copies in your user profile (https://aka.ms/getwinget to add winget)' }
     Resolve-Git
@@ -778,19 +799,7 @@ try {
     $splat = [ordered]@{ World = $world; Backend = $be.backend }
     if ($be.useLogin) { $splat.UseClaudeLogin = $true }
     if (@($repos).Count) { $splat.Repo = [string[]]@($repos) }
-    if ($LaunchArgs) {
-        # -LaunchArgs '-Dev','-Seed','1234': a token starting with '-' names a parameter, the next
-        # token (unless it is another '-name') is its value, otherwise it is a switch. Started with
-        # -File (or from the .cmd) the list arrives as one comma-joined string, so split on commas.
-        $LaunchArgs = @($LaunchArgs | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-        for ($i = 0; $i -lt $LaunchArgs.Count; $i++) {
-            $tok = [string]$LaunchArgs[$i]
-            if ($tok -notmatch '^-([A-Za-z][A-Za-z0-9]*)$') { Quit 1 "-LaunchArgs: expected a -Name before '$tok'" }
-            $name = $Matches[1]
-            if ($i + 1 -lt $LaunchArgs.Count -and ([string]$LaunchArgs[$i + 1]) -notmatch '^-[A-Za-z]') { $splat[$name] = $LaunchArgs[$i + 1]; $i++ }
-            else { $splat[$name] = $true }
-        }
-    }
+    foreach ($k in $launchExtra.Keys) { $splat[$k] = $launchExtra[$k] }
     $shown = foreach ($k in $splat.Keys) { if ($splat[$k] -is [bool]) { "-$k" } else { "-$k " + (@($splat[$k]) -join ',') } }
 
     Write-Head 'Launching'
@@ -816,7 +825,15 @@ try {
         $ErrorActionPreference = 'Stop'
     }
     if ($code -ne 0) {
-        Write-Bad "launch failed (exit $code). The game log is artifacts\logs\game.log, the Foreman log artifacts\logs\foreman-*.log."
+        # tools\launch.ps1's exit codes (its header has the list); it has already said what went wrong
+        $what = switch ($code) {
+            2 { 'an argument was wrong' }
+            3 { 'a prerequisite is missing' }
+            4 { 'a port, or this checkout''s game, is in use by something the launcher did not start' }
+            130 { 'interrupted' }
+            default { 'a step failed' }
+        }
+        Write-Bad "launch failed (exit ${code}: $what; see above). The game log is artifacts\logs\game.log, the Foreman log artifacts\logs\foreman-*.log."
         Quit 3 'Launch failed.'
     }
     if ($splat.Contains('DryRun')) { Quit 0 'Dry run complete; nothing was started.' }
