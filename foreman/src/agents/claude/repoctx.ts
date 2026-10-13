@@ -37,9 +37,11 @@ export function readRepoContext(repoPath: string, warn: (msg: string) => void): 
       continue;
     }
     if (!text) continue;
-    const part = `## ${path.relative(repoPath, f)}\n${text}`;
+    // repo-relative, with "/" on every platform (".claude/rules/a.md", as the repo's own docs write it)
+    const rel = path.relative(repoPath, f).split(path.sep).join('/');
+    const part = `## ${rel}\n${text}`;
     if (size + part.length > REPO_CONTEXT_MAX_BYTES) {
-      warn(`repo context for ${repoPath} over ${REPO_CONTEXT_MAX_BYTES} bytes: skipped ${path.relative(repoPath, f)} and later files`);
+      warn(`repo context for ${repoPath} over ${REPO_CONTEXT_MAX_BYTES} bytes: skipped ${rel} and later files`);
       break;
     }
     size += part.length;
