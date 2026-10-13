@@ -222,17 +222,27 @@ export class RepoManager {
     return (await this.g(r, args, opts)).stdout.trim();
   }
 
-  /** Create the private repository of a folder (once): empty "main", default excludes, no remotes. */
+  /**
+   * Create the private repository of a folder (once): empty "main", default excludes, no remotes.
+   * Line endings pass through unchanged (core.autocrlf false in the private repository's own config,
+   * which its worktrees share): a plain folder has no git settings of its own, so Git for Windows'
+   * system-wide autocrlf=true must not turn the files agents write into CRLF in your folder.
+   */
   private async initShadow(r: Repo): Promise<void> {
     const dir = this.shadowDir(r);
-    if (fs.existsSync(path.join(dir, 'HEAD'))) return;
-    ensureDir(this.shadowRoot);
-    await git(this.shadowRoot, ['init', '-q', '--bare', dir]);
-    await git(dir, ['symbolic-ref', 'HEAD', `refs/heads/${r.branch}`]);
-    await git(dir, ['config', 'core.bare', 'false']);
-    const exclude = path.join(dir, 'info', 'exclude');
-    ensureDir(path.dirname(exclude));
-    fs.writeFileSync(exclude, `# AgentCraft: never snapshotted (a .gitignore in the folder is honoured too)\n${FOLDER_DEFAULT_EXCLUDES.join('\n')}\n`);
+    if (!fs.existsSync(path.join(dir, 'HEAD'))) {
+      ensureDir(this.shadowRoot);
+      await git(this.shadowRoot, ['init', '-q', '--bare', dir]);
+      await git(dir, ['symbolic-ref', 'HEAD', `refs/heads/${r.branch}`]);
+      await git(dir, ['config', 'core.bare', 'false']);
+      const exclude = path.join(dir, 'info', 'exclude');
+      ensureDir(path.dirname(exclude));
+      fs.writeFileSync(exclude, `# AgentCraft: never snapshotted (a .gitignore in the folder is honoured too)\n${FOLDER_DEFAULT_EXCLUDES.join('\n')}\n`);
+    }
+    // also for private repositories made before this setting existed
+    if ((await git(dir, ['config', '--local', '--get', 'core.autocrlf'], { allowFail: true })).stdout.trim() !== 'false') {
+      await git(dir, ['config', 'core.autocrlf', 'false']);
+    }
   }
 
   /**
