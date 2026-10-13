@@ -59,11 +59,15 @@ function Invoke-Captured([string]$Exe, [string[]]$Arguments = @(), [int]$Timeout
         $psi.Arguments = $argLine
     }
     $psi.UseShellExecute = $false
+    # stdin too: a probe gets an empty, closed input instead of ours, so it can never sit waiting
+    # on the caller's console or pipe
+    $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.CreateNoWindow = $true
     try { $p = [System.Diagnostics.Process]::Start($psi) }
     catch { return @{ code = -1; stdout = ''; stderr = ''; out = "could not run ${Exe}: $($_.Exception.Message)"; timedOut = $false } }
+    try { $p.StandardInput.Close() } catch {}
     $o = $p.StandardOutput.ReadToEndAsync()
     $e = $p.StandardError.ReadToEndAsync()
     $finished = $false
