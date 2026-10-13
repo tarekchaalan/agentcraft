@@ -48,23 +48,31 @@ import org.jspecify.annotations.Nullable;
  * Positions are recorded before the test changes them (including full block-entity data) and
  * restored in {@code finally}; the handler's per-player rate and server-wide logged-plot state is
  * cleared there too.
+ *
+ * <p>The plots stand {@link #AWAY_X} blocks east of where the grid puts plots 1 and 2: other tests
+ * (BuildAtOffsetTest, the plot commands) build whole studios at the real plot 1 and 2 in the same
+ * world, at the same time, and an intent applied there changed their station blocks (and theirs
+ * ours), so each failed now and then depending on the order the tests ran in. A plot's index is
+ * only a label here (the telemetry's {@code plot=}); its box follows its origin.
  */
 public final class WorldIntentGameTest {
-	private static final BlockPos PLOT1_ORIGIN = new BlockPos(128, 0, 0);
-	private static final BlockPos PLOT2_ORIGIN = new BlockPos(128, 0, 128);
+	/** How far east of the grid's plots 1 and 2 this test's plots stand (a multiple of the plot stride). */
+	private static final int AWAY_X = 16384;
+	private static final BlockPos PLOT1_ORIGIN = at(128, 0, 0);
+	private static final BlockPos PLOT2_ORIGIN = at(128, 0, 128);
 
-	// Plot 1's box is x 82..174, y 60..100, z -36..54 (Plot.box, inclusive).
-	private static final BlockPos INSIDE_1 = new BlockPos(128, 69, 0);
-	private static final BlockPos OUT_WEST = new BlockPos(81, 69, 0);
-	private static final BlockPos OUT_EAST = new BlockPos(175, 69, 0);
-	private static final BlockPos OUT_NORTH = new BlockPos(128, 69, -37);
-	private static final BlockPos OUT_SOUTH = new BlockPos(128, 69, 55);
-	private static final BlockPos OUT_ABOVE = new BlockPos(128, 101, 0);
-	private static final BlockPos OUT_BELOW = new BlockPos(128, 59, 0);
+	// Plot 1's box is x 82..174 (+ AWAY_X), y 60..100, z -36..54 (Plot.box, inclusive).
+	private static final BlockPos INSIDE_1 = at(128, 69, 0);
+	private static final BlockPos OUT_WEST = at(81, 69, 0);
+	private static final BlockPos OUT_EAST = at(175, 69, 0);
+	private static final BlockPos OUT_NORTH = at(128, 69, -37);
+	private static final BlockPos OUT_SOUTH = at(128, 69, 55);
+	private static final BlockPos OUT_ABOVE = at(128, 101, 0);
+	private static final BlockPos OUT_BELOW = at(128, 59, 0);
 	/** A decision_podium anchor at plot 1's east edge, so bulbs just outside are within reach. */
-	private static final BlockPos PODIUM_ANCHOR = new BlockPos(174, 69, 0);
-	private static final BlockPos BULB_INSIDE = new BlockPos(173, 70, 0);
-	private static final BlockPos BULB_OUTSIDE = new BlockPos(175, 70, 0);
+	private static final BlockPos PODIUM_ANCHOR = at(174, 69, 0);
+	private static final BlockPos BULB_INSIDE = at(173, 70, 0);
+	private static final BlockPos BULB_OUTSIDE = at(175, 70, 0);
 
 	// ------------------------------------------------------------------ plot-box clipping (item 9)
 
@@ -186,11 +194,11 @@ public final class WorldIntentGameTest {
 		ServerLevel level = server.overworld();
 		UUID player = UUID.randomUUID();
 		Plot plot = new Plot(1, StudioId.of(player), PLOT1_ORIGIN);
-		BlockPos podium = new BlockPos(128, 69, 2);
-		BlockPos merge = new BlockPos(128, 69, 4);
-		BlockPos monitor = new BlockPos(128, 69, 6);
-		BlockPos insideBulb = new BlockPos(173, 70, 0);
-		BlockPos outsideBulb = new BlockPos(175, 70, 0);
+		BlockPos podium = at(128, 69, 2);
+		BlockPos merge = at(128, 69, 4);
+		BlockPos monitor = at(128, 69, 6);
+		BlockPos insideBulb = at(173, 70, 0);
+		BlockPos outsideBulb = at(175, 70, 0);
 
 		try (Scene scene = new Scene(level)) {
 			scene.install(onePlot(plot));
@@ -282,10 +290,10 @@ public final class WorldIntentGameTest {
 		ServerLevel level = server.overworld();
 		UUID player = UUID.randomUUID();
 		Plot plot = new Plot(1, StudioId.of(player), PLOT1_ORIGIN);
-		BlockPos bad1 = new BlockPos(128, 71, 0);
-		BlockPos bad2 = new BlockPos(128, 71, 2);
-		BlockPos included = new BlockPos(128, 73, 0);
-		BlockPos fallback = new BlockPos(128, 73, 2);
+		BlockPos bad1 = at(128, 71, 0);
+		BlockPos bad2 = at(128, 71, 2);
+		BlockPos included = at(128, 73, 0);
+		BlockPos fallback = at(128, 73, 2);
 
 		try (Scene scene = new Scene(level)) {
 			scene.install(onePlot(plot));
@@ -380,6 +388,11 @@ public final class WorldIntentGameTest {
 	}
 
 	// ------------------------------------------------------------------ helpers
+
+	/** A fixture position: grid coordinates of plots 1 and 2, moved {@link #AWAY_X} east. */
+	private static BlockPos at(int x, int y, int z) {
+		return new BlockPos(x + AWAY_X, y, z);
+	}
 
 	private static LampStatus status(ServerLevel level, BlockPos pos) {
 		return level.getBlockState(pos).getValue(StatusLampBlock.STATUS);
