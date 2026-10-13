@@ -516,6 +516,21 @@ terminal, podium, merge station, bubbles keep their fixed looks). `dev.hud.state
 banner (top right: "Foreman · sim" / "Reconnecting to the Foreman" / "Foreman not running"; loud
 paper banner at the top centre when claude auth failed). Phase 3: goal boss bar, toasts for `notify`.
 
+**Overlay styles** (`HudOverlay`, settings in `<gameDir>/agentcraft/hud.json`): **Panel** (default,
+the goal bar with the decisions badge, unchanged look), **Pill** (one compact ink line: mini bar,
+%, open counts that step down to short and dot forms, clay stripe + "2 decisions [J]" when one
+waits; capped at 205 px), **Pill+** (goal title and %, a bar, who is working, the next decision's
+first words), **Off**. Positions top centre / top right / top left / bottom left (above the whole
+chat area) / bottom right / right middle; sizes S/M/L; a 5 s peek when a task or goal finishes or a
+decision opens (queued, never on a snapshot); optional auto-hide when idle and hide in combat (hurt
+in the last 5 s or a hostile mob within 12 blocks). It keeps clear of boss bars, effect icons,
+hotbar and status rows, chat, the scoreboard sidebar, subtitles, vanilla toasts, the connection pill
+and the auth banner (which in turn narrows or moves down to keep clear of the pill, effects, sidebar
+and toasts); the paper toasts stack beside / under / above the overlay. Change it with the console's
+`/hud pill bottom_left s` (also `/hud style|position|size|peek|autohide|combat ...`, `/hud cycle`,
+`/hud reset`), the chat command `/achud` with the same words, or the unbound "Cycle the HUD style"
+key. QA: `dev.hud.state` / `dev.hud.set` / `dev.hud.peek` / `dev.hud.vanilla` (mod/DEV.md).
+
 ## Displays (`client.monitor`, `client.taskwall`)
 
 **Monitors** (`MonitorFeature`, `MonitorRenderer`, layout in `MonitorScreen` + `LogRows`): every

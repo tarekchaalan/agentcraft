@@ -12,6 +12,9 @@ import dev.agentcraft.client.ui.Kit;
 import dev.agentcraft.client.ui.Panels;
 import dev.agentcraft.client.ui.TextUtil;
 import dev.agentcraft.client.ui.UiStyle;
+import dev.agentcraft.hud.HudLayout;
+import dev.agentcraft.hud.HudLayout.Env;
+import dev.agentcraft.hud.HudLayout.Rect;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
@@ -20,8 +23,10 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.util.Util;
 
 /**
- * Small Foreman status pill in the top-right corner, and a loud banner at the top centre when the
- * claude backend cannot authenticate.
+ * Small Foreman status pill in the top-right corner (under the effect icons when there are any), and a loud banner
+ * at the top centre when the claude backend cannot authenticate (placed by {@link HudLayout#banner}: under the boss
+ * bars, narrowed or moved down to keep clear of the pill, the effect icons, the sidebar and vanilla toasts; the
+ * overlay and the toasts then keep clear of it).
  * <ul>
  *   <li>connected: quiet ink pill, teal dot, "Foreman · sim" (or the claude account, plus the first
  *       two plan windows on a subscription: "5h 62% · 7d 34%"); fades to a lower opacity after a few
@@ -39,19 +44,24 @@ public final class ConnectionBanner implements HudElement {
 	private static final long FADE_AFTER_MS = 6000;
 
 	/**
-	 * Left / bottom edge of the pill drawn this frame (GUI px; left = gui width and bottom = 0 when
-	 * nothing was drawn). This element is registered before the goal bar and the toasts, so they read
+	 * Left / top / bottom edge of the pill drawn this frame (GUI px; left = gui width and bottom = 0 when
+	 * nothing was drawn). This element is registered before the overlay and the toasts, so they read
 	 * the current frame's values and keep clear of it.
 	 */
 	public static int pillLeft = Integer.MAX_VALUE;
+	public static int pillTop = 0;
 	public static int pillBottom = 0;
+	/** The auth banner drawn this frame (NONE when none): read by {@link HudEnv}, so the overlay and the toasts avoid it. */
+	public static Rect banner = Rect.NONE;
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor g, DeltaTracker deltaTracker) {
 		Minecraft mc = Minecraft.getInstance();
 		pillLeft = g.guiWidth();
+		pillTop = 0;
 		pillBottom = 0;
-		if (mc.player == null || Foreman.state() == null) {
+		banner = Rect.NONE;
+		if (mc.player == null || Foreman.state() == null || mc.gui.hud.isHidden()) {
 			return;
 		}
 		ForemanState st = Foreman.state();
@@ -89,10 +99,12 @@ public final class ConnectionBanner implements HudElement {
 			title = "Foreman not running";
 			detail = "start it: cd foreman; npm run start";
 		}
-		drawPill(g, font, dot, title, detail, alpha, pulse, now);
+		Env env = HudEnv.forPill(mc, g.guiWidth(), g.guiHeight());
+		drawPill(g, font, env, dot, title, detail, alpha, pulse, now);
 
 		if (link.synced() && fs != null && fs.auth() == AuthStatus.FAILED) {
-			drawAuthBanner(g, font, fs);
+			Env full = HudEnv.current(mc, g.guiWidth(), g.guiHeight());
+			drawAuthBanner(g, font, full, fs);
 		}
 	}
 
@@ -139,7 +151,8 @@ public final class ConnectionBanner implements HudElement {
 		return d == Math.rint(d) ? Long.toString((long) d) : Double.toString(d);
 	}
 
-	private static void drawPill(GuiGraphicsExtractor g, Font font, String dot, String title, String detail, int alpha, boolean pulse, long now) {
+	private static void drawPill(GuiGraphicsExtractor g, Font font, Env env, String dot, String title, String detail, int alpha, boolean pulse,
+		long now) {
 		Kit.Padding p = Kit.padding("tooltip");
 		// never wider than the screen: whatever still overflows is ellipsized so the pill stays on it
 		int maxText = Math.max(20, g.guiWidth() - 2 * MARGIN - p.left() - 11 - 4 - p.right());
@@ -152,7 +165,13 @@ public final class ConnectionBanner implements HudElement {
 		int h = p.top() + 9 + (detail == null ? 0 : 10) + p.bottom();
 		int x = g.guiWidth() - w - MARGIN;
 		int y = MARGIN;
+		// under the effect icons when the player has any (they sit in the same corner)
+		Rect effects = HudLayout.effects(env);
+		if (!effects.empty() && x + w > effects.x() - HudLayout.GAP) {
+			y = Math.max(y, effects.bottom() + HudLayout.GAP);
+		}
 		pillLeft = x;
+		pillTop = y;
 		pillBottom = y + h;
 		int tint = (alpha << 24) | 0xFFFFFF;
 		Panels.sprite(g, Kit.TOOLTIP, x, y, w, h, tint);
@@ -170,20 +189,28 @@ public final class ConnectionBanner implements HudElement {
 		}
 	}
 
-	private static void drawAuthBanner(GuiGraphicsExtractor g, Font font, ForemanStatus fs) {
+	private static void drawAuthBanner(GuiGraphicsExtractor g, Font font, Env env, ForemanStatus fs) {
 		String head = switch (fs.backend()) {
 			case CODEX -> "Codex backend can't authenticate";
 			case CLAUDE -> "Claude backend can't authenticate";
 			default -> "Agent backend can't authenticate";
 		};
 		String msg = fs.message() != null ? fs.message() : "run `claude` and /login, then restart the Foreman";
-		int maxW = Math.min(360, g.guiWidth() - 40);
-		var lines = TextUtil.wrap(font, msg, maxW - 34);
 		Kit.Padding p = Kit.padding("panel_paper");
-		int w = Math.min(maxW, Math.max(font.width(head), lines.stream().mapToInt(font::width).max().orElse(0)) + 34 + p.left() + p.right() - 16);
-		int h = p.top() + 10 + lines.size() * 10 + p.bottom();
-		int x = (g.guiWidth() - w) / 2;
-		int y = MARGIN;
+		int frame = 34 + p.left() + p.right() - 16;
+		int wantW = Math.min(360, Math.max(font.width(head), font.width(msg)) + frame);
+		int minW = font.width(head) + frame;
+		// the message wraps to the width: the layout asks how tall each candidate width is
+		Rect r = HudLayout.banner(env, wantW, minW, w -> p.top() + 10 + TextUtil.wrap(font, msg, w - frame).size() * 10 + p.bottom());
+		if (r.empty()) {
+			return;
+		}
+		banner = r;
+		int x = r.x();
+		int y = r.y();
+		int w = r.w();
+		int h = r.h();
+		var lines = TextUtil.wrap(font, msg, w - frame);
 		Panels.panel(g, x, y, w, h);
 		long now = Util.getMillis();
 		float t = (float) Math.sin((now % 1200) / 1200.0 * Math.PI * 2) * 0.5f + 0.5f;

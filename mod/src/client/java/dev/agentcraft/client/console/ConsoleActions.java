@@ -8,6 +8,7 @@ import dev.agentcraft.client.console.ConsoleCommands.Decide;
 import dev.agentcraft.client.console.ConsoleCommands.Empty;
 import dev.agentcraft.client.console.ConsoleCommands.Goal;
 import dev.agentcraft.client.console.ConsoleCommands.Help;
+import dev.agentcraft.client.console.ConsoleCommands.Hud;
 import dev.agentcraft.client.console.ConsoleCommands.Intent;
 import dev.agentcraft.client.console.ConsoleCommands.Invalid;
 import dev.agentcraft.client.console.ConsoleCommands.Message;
@@ -34,6 +35,7 @@ import dev.agentcraft.client.foreman.Protocol.Usage;
 import dev.agentcraft.client.foreman.Protocol.UsageExtra;
 import dev.agentcraft.client.foreman.Protocol.UsageWindow;
 import dev.agentcraft.client.foreman.UsageText;
+import dev.agentcraft.client.hud.HudFeature;
 import dev.agentcraft.client.hud.HudSounds;
 import dev.agentcraft.client.hud.UiBits;
 import java.util.ArrayList;
@@ -152,6 +154,12 @@ public final class ConsoleActions {
 				String state = HudSounds.enabled() ? "on" : "off";
 				String why = HudSounds.forcedMute() ? " (the game was started muted: AGENTCRAFT_MUTE=1)" : "";
 				ConsoleLog.add(Tone.INFO, "Decision bell and done chime: " + state + why);
+				clearFeedback();
+				return After.CLEAR;
+			}
+			case Hud h -> {
+				ConsoleLog.remember(raw);
+				ConsoleLog.add(Tone.INFO, HudFeature.applyCommand(h.change()));
 				clearFeedback();
 				return After.CLEAR;
 			}

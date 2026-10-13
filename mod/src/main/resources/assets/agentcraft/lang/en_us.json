@@ -35,5 +35,6 @@
   "key.category.agentcraft.agentcraft": "AgentCraft",
   "key.agentcraft.console": "Open the console",
   "key.agentcraft.console_terminal": "Console (looking at a terminal)",
-  "key.agentcraft.decisions": "Answer decisions"
+  "key.agentcraft.decisions": "Answer decisions",
+  "key.agentcraft.hud_style": "Cycle the HUD style (Off, Pill, Pill+, Panel)"
 }
