@@ -366,7 +366,9 @@ export class TeamBackend implements Backend {
     // permission prompts from a dead process are moot; the resumed agent retries the tool
     for (const d of this.fm.decisions.open().filter((x) => x.kind === 'permission')) this.fm.decisions.cancel(d.id, 'Foreman restarted');
     for (const [agentId, inf] of Object.entries(st.inflight)) {
-      if (this.isStopped(agentId) || !this.fm.agent(agentId)) {
+      // a turn for a task that is gone or cancelled has nothing to resume
+      const task = inf.taskId ? this.fm.tasks.get(inf.taskId) : undefined;
+      if (this.isStopped(agentId) || !this.fm.agent(agentId) || (inf.taskId && (!task || task.status === 'cancelled'))) {
         delete st.inflight[agentId];
         continue;
       }
@@ -1201,6 +1203,14 @@ export class TeamBackend implements Backend {
         if (r.job.taskId === task.id && id !== LEAD && (action === 'cancel' || task.assignee !== id)) this.abortTurn(r, 'cancel');
       }
       for (const [id, q] of this.queues) this.queues.set(id, q.filter((j) => j.taskId !== task.id || (action === 'reassign' && task.assignee === id)));
+      // a paused or persisted continuation of the task would bring it back on resume / restart
+      for (const [id, job] of this.pausedJobs) {
+        if (job.taskId === task.id && (action === 'cancel' || (id !== LEAD && task.assignee !== id))) this.pausedJobs.delete(id);
+      }
+      for (const [id, job] of Object.entries(this.st.inflight)) {
+        if (job.taskId === task.id && (action === 'cancel' || (id !== LEAD && task.assignee !== id))) delete this.st.inflight[id];
+      }
+      this.fm.store.markDirty();
       // reassigned: the new worker continues from the old worker's branch once that turn is over
       if (action === 'reassign' && task.repoId && task.worktree) {
         const wt = this.fm.repos.findWorktree(task.repoId, task.worktree);
